@@ -426,7 +426,7 @@ def admin_faq_delete(faq_id):
 
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
-TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
+TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')  # Set in Render env vars
 
 @app.route('/sms/webhook', methods=['GET', 'POST'])
 def sms_webhook():
