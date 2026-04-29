@@ -34,12 +34,18 @@
         <form method="POST" id="agreeForm" class="mt-6">
             <input type="hidden" name="signature_data" id="signature_data">
 
-            <div class="flex items-start gap-3 mb-6">
+            <div class="flex items-start gap-3 mb-4">
                 <input type="checkbox" id="acknowledge" name="acknowledge" required class="mt-1 h-4 w-4 text-rose-600 border-gray-300 rounded focus:ring-rose-500">
                 <label for="acknowledge" class="text-sm text-gray-700">
-                    I have read and understand the Staff Uniform & Professional Conduct Agreement above. 
+                    I have read and understand the Staff Uniform & Professional Conduct Agreement above.
                     I agree to comply with all terms and conditions outlined.
                 </label>
+            </div>
+
+            <!-- Staff SMS Support -->
+            <div class="bg-rose-50 border border-rose-200 rounded-lg p-4 mb-6 text-sm">
+                <p class="text-rose-800 font-medium mb-1">📱 Questions before the event?</p>
+                <p class="text-rose-700">Text <strong>(240) 916-2545</strong> anytime — get instant answers to logistics, schedule, food & safety questions. No waiting for a reply.</p>
             </div>
 
             <button type="submit" id="submitBtn" disabled
