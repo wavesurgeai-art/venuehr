@@ -22,6 +22,7 @@
                 <div class="flex gap-4 text-sm text-gray-600">
                     <a href="{{ url_for('dashboard') }}" class="hover:text-gray-900 {% if request.endpoint == 'dashboard' %}text-gray-900 font-medium{% endif %}">Dashboard</a>
                     <a href="{{ url_for('staff_list') }}" class="hover:text-gray-900 {% if request.endpoint and 'staff' in request.endpoint %}text-gray-900 font-medium{% endif %}">Staff</a>
+                    <a href="{{ url_for('admin_faqs') }}" class="hover:text-gray-900 {% if request.endpoint and 'faq' in request.endpoint %}text-gray-900 font-medium{% endif %}">FAQs</a>
                 </div>
             </div>
             <div class="flex items-center gap-4">

@@ -30,9 +30,14 @@
 │   ├── login.html
 │   ├── admin_dashboard.html
 │   ├── staff_list.html
-│   ├── staff_onboard.html
+│   ├── staff_detail.html
 │   ├── agreement.html
-│   └── view_agreement.html
+│   ├── view_agreement.html
+│   ├── onboard_thanks.html
+│   ├── faq_page.html       # Public FAQ for staff
+│   ├── faq_search.html    # FAQ search results
+│   ├── admin_faqs.html    # Admin FAQ management
+│   └── admin_faq_edit.html # Admin FAQ edit form
 ├── static/
 │   └── uploads/            # Signature images
 └── requirements.txt
@@ -155,6 +160,14 @@ The agreement text (all 4 sections):
 | GET | `/onboard/<token>` | Staff | Onboarding/agreement page |
 | POST | `/onboard/<token>` | Staff | Submit signed agreement |
 | GET | `/onboard/<token>/thanks` | Staff | Thank you page |
+| GET | `/faq` | None | Public FAQ page for staff |
+| GET | `/faq/search` | None | Search FAQs by keyword |
+| GET | `/admin/faqs` | Admin | FAQ management dashboard |
+| POST | `/admin/faqs/add` | Admin | Add new FAQ |
+| GET | `/admin/faqs/<id>/edit` | Admin | Edit FAQ form |
+| POST | `/admin/faqs/<id>/edit` | Admin | Submit FAQ edit |
+| POST | `/admin/faqs/<id>/delete` | Admin | Delete FAQ |
+| GET/POST | `/sms/webhook` | None | Twilio SMS webhook for auto-reply |
 
 ---
 
@@ -186,3 +199,69 @@ The agreement text (all 4 sections):
 - PDF export of agreements
 - Staff shift scheduling
 - Payroll integration
+
+---
+
+## 8. FAQ Database
+
+### Overview
+A searchable knowledge base of frequently asked questions, accessible to staff via a public page or SMS auto-reply.
+
+### Categories
+- **Logistics** — Parking, check-in, venue directions
+- **Schedule** — Shift times, time-off requests
+- **Food & Beverage** — Staff meals, break areas, floor rules
+- **Safety & Emergency** — Evacuation plans, medical emergencies
+- **Task Specifics** — Bartender duties, guest interactions, phone policy, uniform
+
+### Database Schema
+**faqs**
+| Column | Type | Description |
+|--------|------|-------------|
+| id | TEXT (UUID) | Primary key |
+| category | TEXT | FAQ category |
+| question | TEXT | Question text |
+| answer | TEXT | Full answer |
+| keywords | TEXT | Comma-separated keywords for SMS matching |
+| created_at | TEXT | ISO timestamp |
+
+### Staff FAQ Page (`/faq`)
+- Public page accessible to all staff
+- Questions grouped by category with collapsible accordions
+- Real-time search bar filters FAQs by keyword
+- Link shared in onboarding welcome message
+
+### Admin FAQ Management (`/admin/faqs`)
+- CRUD operations: Add, edit, delete FAQs
+- Keyword field drives SMS auto-reply matching
+- Instant updates to live FAQ and SMS responses
+
+---
+
+## 9. Staff SMS Auto-Reply (Twilio)
+
+### Overview
+When a staff member texts the venue's Twilio phone number, the system automatically replies with the most relevant FAQ answer.
+
+### Configuration
+Environment variables (set in production deployment):
+- `TWILIO_ACCOUNT_SID` — Twilio Account SID
+- `TWILIO_AUTH_TOKEN` — Twilio Auth Token
+- `TWILIO_PHONE_NUMBER` — Venue's Twilio phone number
+
+### Webhook Endpoint
+**POST /sms/webhook** — Twilio posts incoming SMS here
+**GET /sms/webhook** — Twilio validation request (returns 200)
+
+### Auto-Reply Logic
+1. Parse incoming SMS body (lowercase, stripped)
+2. Search FAQ database using keyword scoring:
+   - Exact keyword match: +3 points
+   - Partial keyword match: +1 point
+   - Query word appears in question/answer text: +0.5 point
+3. Return best match with header: "Hi! Here's what I found in our FAQ:"
+4. If no match: Return "contact your coordinator" message with FAQ page URL
+5. Twilio signature validation enforced when credentials are set
+
+### TwiML Response
+Always returns valid TwiML (`MessagingResponse`) to acknowledge receipt to Twilio.

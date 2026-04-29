@@ -12,8 +12,9 @@ from functools import wraps
 import bcrypt
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, flash, send_from_directory, jsonify
+    session, flash, send_from_directory, jsonify, make_response
 )
+from urllib.parse import urlencode
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -106,6 +107,14 @@ def init_db():
         agreement_text TEXT,
         FOREIGN KEY (staff_id) REFERENCES staff(id)
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS faqs (
+        id TEXT PRIMARY KEY,
+        category TEXT NOT NULL,
+        question TEXT NOT NULL,
+        answer TEXT NOT NULL,
+        keywords TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )''')
     # Create default admin if none exists (PIN: 1234)
     c.execute('SELECT id FROM admins LIMIT 1')
     if c.fetchone() is None:
@@ -115,6 +124,27 @@ def init_db():
             'INSERT INTO admins (id, name, pin_hash, created_at) VALUES (?, ?, ?, ?)',
             (admin_id, 'Venue Manager', pin_hash, datetime.utcnow().isoformat())
         )
+    # Seed default FAQs if none exist
+    c.execute('SELECT COUNT(*) as count FROM faqs')
+    if c.fetchone()['count'] == 0:
+        now = datetime.utcnow().isoformat()
+        faqs = [
+            ('Logistics', 'Where do I park?', 'Staff parking is located at the rear entrance. Please do not park in the client lot or designated guest spaces.', 'parking,park,lot,where', now),
+            ('Logistics', 'Where do I check in when I arrive?', 'Check in at the Lead Coordinator station at the main entrance. Your shift supervisor will greet you there.', 'check in,arrive,where,start,shift', now),
+            ('Schedule', 'What time should I arrive for my shift?', 'Please arrive 30 minutes before your scheduled start time to allow for check-in and uniform inspection.', 'time,when,arrive,shift start,schedule', now),
+            ('Schedule', 'How do I request time off?', 'Submit time-off requests at least 48 hours in advance through the venue manager portal or speak directly with your Lead Coordinator.', 'time off,request,absence,off', now),
+            ('Food & Beverage', 'Where are the staff meal and break areas?', 'Staff meals are served in the back kitchen area. Breaks are limited to 10 minutes in the designated break room only.', 'food,meal,break,eat,drink,staff meal', now),
+            ('Food & Beverage', 'Can I eat or drink on the floor?', 'No eating, drinking (other than water in designated areas), or smoking/vaping is permitted in view of guests.', 'eat,floor,dining,breakfast,lunch,dinner', now),
+            ('Safety & Emergency', 'What is the emergency exit plan?', 'Emergency exits are marked with illuminated signs. In case of evacuation, proceed calmly to the nearest exit and meet at the designated assembly point in the parking lot.', 'emergency,evacuation,fire,exit,safety', now),
+            ('Safety & Emergency', 'Who do I contact in case of a medical emergency?', 'Call 911 immediately, then notify the Lead Coordinator. Do not attempt to move an injured person unless there is immediate danger.', 'medical,emergency,injury,hurt,911', now),
+            ('Task Specifics', 'What are my duties as a bartender?', 'Bartenders must follow Indiana ATC guidelines at all times. Do not over-pour drinks, never consume alcohol on venue property, and ensure all bottles are accounted for at shift end.', 'bartender,duties,drinks,alcohol,bar', now),
+            ('Task Specifics', 'What if a guest makes an inappropriate request?', 'Politely decline and say: "I\'m here to ensure you have a wonderful evening — let me get my Lead Coordinator to assist you." Then alert your Lead Coordinator immediately.', 'inappropriate,request,complaint,guest issue', now),
+            ('Task Specifics', 'Can I use my phone during the event?', 'No. Cell phones must be kept in the staff locker or your vehicle. No texting or social media use is permitted on the floor.', 'phone,cell,text,social media,device', now),
+            ('Task Specifics', 'What should I wear?', 'Solid black button-down shirt, black dress slacks, and black non-slip dress shoes. Clothing must be pressed, clean, and free of lint or pet hair. No visible headphones, heavy fragrances, or excessive jewelry.', 'wear,uniform,clothes,shoes,appearance,grooming', now),
+        ]
+        for faq in faqs:
+            c.execute('INSERT INTO faqs (id, category, question, answer, keywords, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                      (str(uuid.uuid4()), faq[0], faq[1], faq[2], faq[3], faq[4]))
     conn.commit()
     conn.close()
 
@@ -291,6 +321,201 @@ def onboard_thanks(token):
 def serve_signature(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
+# ─── FAQ Routes ────────────────────────────────────────────────────────────────
+
+@app.route('/faq')
+def faq_page():
+    """Public FAQ page for staff."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT DISTINCT category FROM faqs ORDER BY category')
+    categories = [row['category'] for row in c.fetchall()]
+    c.execute('SELECT * FROM faqs ORDER BY category, question')
+    faqs = c.fetchall()
+    conn.close()
+    return render_template('faq_page.html', faqs=faqs, categories=categories)
+
+@app.route('/faq/search')
+def faq_search():
+    """Search FAQs by keyword."""
+    q = request.args.get('q', '').lower().strip()
+    conn = get_db()
+    c = conn.cursor()
+    if q:
+        c.execute("SELECT * FROM faqs ORDER BY category, question")
+        all_faqs = c.fetchall()
+        # Score each FAQ by keyword match
+        scored = []
+        for faq in all_faqs:
+            keywords = faq['keywords'].lower().split(',')
+            score = sum(1 for kw in keywords if kw.strip() in q) + sum(1 for kw in keywords if q in kw.strip())
+            if score > 0:
+                scored.append((score, faq))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = [f for _, f in scored[:5]]
+    else:
+        results = []
+    conn.close()
+    return render_template('faq_search.html', results=results, query=q)
+
+@app.route('/admin/faqs')
+@login_required
+def admin_faqs():
+    """Admin FAQ management page."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT DISTINCT category FROM faqs ORDER BY category')
+    categories = [row['category'] for row in c.fetchall()]
+    c.execute('SELECT * FROM faqs ORDER BY category, question')
+    faqs = c.fetchall()
+    conn.close()
+    return render_template('admin_faqs.html', faqs=faqs, categories=categories, admin_name=session.get('admin_name'))
+
+@app.route('/admin/faqs/add', methods=['POST'])
+@login_required
+def admin_faq_add():
+    """Add a new FAQ."""
+    conn = get_db()
+    c = conn.cursor()
+    faq_id = str(uuid.uuid4())
+    c.execute('INSERT INTO faqs (id, category, question, answer, keywords, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+              (faq_id, request.form.get('category'), request.form.get('question'),
+               request.form.get('answer'), request.form.get('keywords'), datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
+    flash('FAQ added successfully.', 'success')
+    return redirect(url_for('admin_faqs'))
+
+@app.route('/admin/faqs/<faq_id>/edit', methods=['GET', 'POST'])
+@login_required
+def admin_faq_edit(faq_id):
+    """Edit an existing FAQ."""
+    conn = get_db()
+    c = conn.cursor()
+    if request.method == 'POST':
+        c.execute('UPDATE faqs SET category=?, question=?, answer=?, keywords=? WHERE id=?',
+                  (request.form.get('category'), request.form.get('question'),
+                   request.form.get('answer'), request.form.get('keywords'), faq_id))
+        conn.commit()
+        conn.close()
+        flash('FAQ updated.', 'success')
+        return redirect(url_for('admin_faqs'))
+    c.execute('SELECT * FROM faqs WHERE id = ?', (faq_id,))
+    faq = c.fetchone()
+    c.execute('SELECT DISTINCT category FROM faqs ORDER BY category')
+    categories = [row['category'] for row in c.fetchall()]
+    conn.close()
+    if not faq:
+        flash('FAQ not found.', 'error')
+        return redirect(url_for('admin_faqs'))
+    return render_template('admin_faq_edit.html', faq=faq, categories=categories, admin_name=session.get('admin_name'))
+
+@app.route('/admin/faqs/<faq_id>/delete', methods=['POST'])
+@login_required
+def admin_faq_delete(faq_id):
+    """Delete an FAQ."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('DELETE FROM faqs WHERE id = ?', (faq_id,))
+    conn.commit()
+    conn.close()
+    flash('FAQ deleted.', 'success')
+    return redirect(url_for('admin_faqs'))
+
+# ─── Twilio SMS Auto-Reply ────────────────────────────────────────────────────
+
+TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
+TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
+TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
+
+@app.route('/sms/webhook', methods=['GET', 'POST'])
+def sms_webhook():
+    """Twilio SMS webhook — receives texts and auto-replies with FAQ answers."""
+    if request.method == 'GET':
+        # Twilio validation request
+        return '', 200
+
+    from twilio.rest import Client
+    from twilio.request_validator import RequestValidator
+
+    # Validate Twilio signature in production
+    if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+        validator = RequestValidator(TWILIO_AUTH_TOKEN)
+        signature = request.headers.get('X-Twilio-Signature', '')
+        url = request.url
+        if not validator.validate(url, request.form, signature):
+            return 'Forbidden', 403
+
+    # Parse incoming SMS
+    from_number = request.form.get('From', '')
+    body = request.form.get('Body', '').strip().lower()
+
+    # Find best FAQ match
+    answer = find_best_faq_answer(body)
+
+    # Send auto-reply via Twilio
+    if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER:
+        try:
+            client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+            client.messages.create(
+                body=answer,
+                from_=TWILIO_PHONE_NUMBER,
+                to=from_number
+            )
+        except Exception as e:
+            app.logger.error(f'Twilio error: {e}')
+
+    # Respond with TwiML
+    from twilio.twiml import MessagingResponse
+    resp = MessagingResponse()
+    resp.message(answer)
+    return str(resp), 200, {'Content-Type': 'text/xml'}
+
+def find_best_faq_answer(query: str) -> str:
+    """Search FAQ database for best matching answer."""
+    if not query:
+        return ("Hi! Thank you for reaching out. For questions about your shift, "
+                "uniform, parking, or any other topic, please visit our FAQ page: "
+                f"{request.host_url}faq\n\n"
+                "For immediate assistance, contact your Lead Coordinator.")
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM faqs')
+    all_faqs = c.fetchall()
+    conn.close()
+
+    query_words = set(query.lower().split())
+    best_score = 0
+    best_answer = None
+
+    for faq in all_faqs:
+        keywords = [kw.strip().lower() for kw in faq['keywords'].split(',')]
+        score = 0
+        for word in query_words:
+            for kw in keywords:
+                if word == kw:
+                    score += 3
+                elif word in kw or kw in word:
+                    score += 1
+        # Bonus: query words appearing in question/answer
+        full_text = (faq['question'] + ' ' + faq['answer']).lower()
+        for word in query_words:
+            if word in full_text:
+                score += 0.5
+        if score > best_score:
+            best_score = score
+            best_answer = faq['answer']
+
+    if best_score > 0:
+        header = ("Hi! Here's what I found in our FAQ:\n\n")
+        return header + best_answer + (
+            f"\n\nFor more questions, visit: {request.host_url}faq\n"
+            "For immediate help, contact your Lead Coordinator.")
+
+    return ("I'm not sure I understood that. For help, please contact your Lead Coordinator "
+            f"or visit our FAQ page: {request.host_url}faq")
+
 if __name__ == '__main__':
     init_db()
-    app.run(host='0.0.0.0', port=5002, debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=False)
