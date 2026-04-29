@@ -1,0 +1,188 @@
+# HRaaS Platform for Wedding Venues — Specification
+
+## Overview
+
+**Product Name:** VenueHR — Staff Management & Compliance Platform  
+**Type:** HR as a Service (HRaaS) Web Application  
+**Core Functionality:** Enable wedding venues to onboard staff, distribute Staff Uniform & Professional Conduct Agreements, capture digital signatures, and track compliance via an admin dashboard.  
+**Target Users:** Wedding venue managers (admins) and event staff (employees)
+
+---
+
+## 1. Architecture
+
+### Stack
+- **Backend:** Python Flask (lightweight, SQLite-compatible)
+- **Database:** SQLite via `team-db` / Turso
+- **Frontend:** HTML5 + Tailwind CSS (via CDN) + vanilla JavaScript
+- **Digital Signatures:** Canvas-based signature pad (no external service required)
+- **File Storage:** Local filesystem (`/home/team/shared/uploads/`)
+
+### Application Structure
+```
+/home/team/shared/
+├── SPEC.md
+├── app.py                  # Flask application entry point
+├── hraas.db                # SQLite database (gitignored, managed via team-db)
+├── templates/              # HTML templates
+│   ├── base.html
+│   ├── index.html
+│   ├── login.html
+│   ├── admin_dashboard.html
+│   ├── staff_list.html
+│   ├── staff_onboard.html
+│   ├── agreement.html
+│   └── view_agreement.html
+├── static/
+│   └── uploads/            # Signature images
+└── requirements.txt
+```
+
+---
+
+## 2. Features & Workflows
+
+### 2.1 Admin Authentication
+- Simple PIN-based login for venue managers (stored hashed in DB)
+- Default admin PIN set via environment variable or first-run setup
+- Session management with Flask-Login
+
+### 2.2 Staff Onboarding Workflow
+1. **Admin creates staff record** — name, email, phone, role (bartender, server, coordinator, etc.), hire date
+2. **System generates unique onboarding link** — sent via email placeholder (displayed to admin to copy)
+3. **Staff member clicks link** — lands on agreement page
+4. **Staff reads and signs agreement** — full legal text displayed, canvas signature captured
+5. **Signed agreement stored** — timestamp, IP address, signature image
+6. **Admin notified** — dashboard shows pending/completed agreements
+
+### 2.3 Staff Uniform & Professional Conduct Agreement
+The agreement text (all 4 sections):
+
+**Section 1: Brand Standard (Uniform)**
+> Our clients are paying for a "once-in-a-lifetime" experience. As a member of the service team, you are part of the decor.
+> 
+> **The Look:** Solid black button-down shirt, black dress slacks, and black non-slip dress shoes.
+> 
+> **Grooming:** Clothing must be pressed, clean, and free of lint or pet hair.
+> 
+> **Visible Items:** No visible headphones/AirPods, heavy fragrances, or excessive jewelry that interferes with service.
+
+**Section 2: The "Invisible" Service Standard**
+> The best service is the kind the guests don't notice until they need something.
+> 
+> **Cell Phone Policy:** Cell phones are to be kept in the staff locker or your vehicle. No texting or social media use is permitted on the floor.
+> 
+> **Guest Interaction:** Always yield the right of way to guests. If a guest asks a question you cannot answer, say: "I will find out for you immediately," and alert the Lead Coordinator.
+> 
+> **Consumption:** No eating, drinking (other than water in designated areas), or smoking/vaping is permitted in view of guests.
+
+**Section 3: Professional Boundaries**
+> The "No-Fraternization" Rule: You are there to serve the wedding, not join it. Do not accept drinks from guests, do not join the dance floor, and do not request photos with the wedding party or high-profile guests.
+> 
+> **Alcohol Service:** If you are a bartender, you must strictly adhere to Indiana ATC guidelines. Never "over-pour" for a guest, and never consume alcohol during or after your shift on venue property.
+
+**Section 4: Social Media & Privacy**
+> **Privacy:** Do not post photos or videos of the wedding party, their decor, or their guests to your personal social media accounts without explicit permission from the Venue Manager.
+> 
+> **Confidentiality:** Respect the privacy of our clients. What you hear or see at a private event stays at the event.
+
+### 2.4 Admin Dashboard
+- **Compliance Overview:** Total staff, pending agreements, signed agreements, expired (if renewal enabled)
+- **Staff Roster Table:** Name, role, hire date, agreement status, actions (view, resend link)
+- **Quick Stats Cards:** Visual indicators of compliance rate
+- **Filter/Search:** By name, role, agreement status
+
+### 2.5 Staff Portal (Onboarding Link)
+- Read-only agreement display
+- Digital signature canvas
+- Acknowledgment checkbox ("I have read and agree to the terms")
+- Submit → redirects to thank-you page
+
+---
+
+## 3. Database Schema
+
+### Tables
+
+**admins**
+| Column | Type | Description |
+|--------|------|-------------|
+| id | TEXT (UUID) | Primary key |
+| name | TEXT | Admin's name |
+| pin_hash | TEXT | bcrypt hash of PIN |
+| created_at | TEXT | ISO timestamp |
+
+**staff**
+| Column | Type | Description |
+|--------|------|-------------|
+| id | TEXT (UUID) | Primary key |
+| venue_id | TEXT | FK to config.venue_id |
+| name | TEXT | Staff full name |
+| email | TEXT | Email address |
+| phone | TEXT | Phone number |
+| role | TEXT | bartender/server/coordinator/other |
+| hire_date | TEXT | YYYY-MM-DD |
+| onboarding_token | TEXT | Unique token for onboarding link |
+| agreement_status | TEXT | pending/signed/expired |
+| created_at | TEXT | ISO timestamp |
+
+**agreements**
+| Column | Type | Description |
+|--------|------|-------------|
+| id | TEXT (UUID) | Primary key |
+| staff_id | TEXT | FK to staff.id |
+| signed_at | TEXT | ISO timestamp |
+| ip_address | TEXT | Signer's IP |
+| signature_image | TEXT | Path to signature PNG |
+| agreement_text | TEXT | Snapshot of agreement content at signing |
+
+---
+
+## 4. API Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/` | None | Landing page |
+| GET | `/login` | None | Admin login page |
+| POST | `/login` | None | Process login |
+| GET | `/logout` | Admin | End session |
+| GET | `/admin` | Admin | Dashboard |
+| GET | `/admin/staff` | Admin | Staff roster |
+| POST | `/admin/staff` | Admin | Create staff record |
+| GET | `/admin/staff/<id>` | Admin | View staff details |
+| GET | `/admin/staff/<id>/agreement` | Admin | View signed agreement |
+| POST | `/admin/staff/<id>/resend-link` | Admin | Regenerate onboarding link |
+| GET | `/onboard/<token>` | Staff | Onboarding/agreement page |
+| POST | `/onboard/<token>` | Staff | Submit signed agreement |
+| GET | `/onboard/<token>/thanks` | Staff | Thank you page |
+
+---
+
+## 5. UI/UX Design
+
+- **Style:** Clean, professional, minimal — matching wedding venue elegance
+- **Colors:** White (#FFFFFF) background, charcoal (#374151) text, rose (#F43F5E) accent
+- **Typography:** System sans-serif stack (clean, fast-loading)
+- **Layout:** Centered card layout for forms; sidebar navigation for admin dashboard
+- **Mobile:** Responsive, works on phones for staff signing on-the-go
+
+---
+
+## 6. Security Considerations
+
+- PIN stored as bcrypt hash (not plaintext)
+- Onboarding tokens are cryptographically random UUIDs
+- Signature images stored outside web root, served via protected endpoint
+- All forms CSRF-protected via Flask-WTF tokens
+- Admin sessions expire after 8 hours of inactivity
+
+---
+
+## 7. Out of Scope (Phase 1)
+
+- Email delivery (links displayed/copied manually)
+- Multi-venue support (single venue per instance)
+- Agreement version history
+- PDF export of agreements
+- Staff shift scheduling
+- Payroll integration

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}Staff Roster — VenueHR{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center mb-8">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Staff Roster</h1>
+        <p class="text-gray-500">Manage staff and track agreement compliance</p>
+    </div>
+    <button onclick="document.getElementById('add-form').classList.toggle('hidden')"
+            class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition">
+        + Add Staff Member
+    </button>
+</div>
+
+<!-- Add Staff Form -->
+<div id="add-form" class="hidden bg-white rounded-xl shadow-sm p-6 border border-gray-200 mb-8">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Add New Staff Member</h2>
+    <form method="POST" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+            <input type="text" name="name" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+            <input type="email" name="email" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+            <input type="tel" name="phone" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Role *</label>
+            <select name="role" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
+                <option value="bartender">Bartender</option>
+                <option value="server">Server</option>
+                <option value="coordinator">Coordinator</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Hire Date</label>
+            <input type="date" name="hire_date" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
+        </div>
+        <div class="md:col-span-2 flex gap-3 mt-2">
+            <button type="submit" class="bg-rose-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">Add Staff Member</button>
+            <button type="button" onclick="document.getElementById('add-form').classList.add('hidden')" class="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg text-sm font-medium hover:bg-gray-300">Cancel</button>
+        </div>
+    </form>
+</div>
+
+<!-- Staff Table -->
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <table class="w-full">
+        <thead class="bg-gray-50 border-b border-gray-200">
+            <tr>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Name</th>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Role</th>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Hire Date</th>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+            {% for s in staff %}
+            <tr>
+                <td class="px-6 py-4">
+                    <div class="font-medium text-gray-900">{{ s.name }}</div>
+                    <div class="text-sm text-gray-500">{{ s.email }}</div>
+                </td>
+                <td class="px-6 py-4 text-gray-700 capitalize">{{ s.role }}</td>
+                <td class="px-6 py-4 text-gray-700">{{ s.hire_date or '—' }}</td>
+                <td class="px-6 py-4">
+                    {% if s.agreement_status == 'signed' %}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Signed</span>
+                    {% elif s.agreement_status == 'pending' %}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Pending</span>
+                    {% else %}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">Expired</span>
+                    {% endif %}
+                </td>
+                <td class="px-6 py-4 flex gap-2">
+                    <a href="{{ url_for('staff_detail', staff_id=s.id) }}" class="text-rose-600 hover:text-rose-700 text-sm font-medium">View</a>
+                    {% if s.agreement_status == 'pending' %}
+                    <form method="POST" action="{{ url_for('resend_link', staff_id=s.id) }}" class="inline">
+                        <button type="submit" class="text-gray-600 hover:text-gray-700 text-sm font-medium">Resend Link</button>
+                    </form>
+                    {% endif %}
+                    {% if s.agreement_status == 'signed' %}
+                    <a href="{{ url_for('view_agreement', staff_id=s.id) }}" class="text-gray-600 hover:text-gray-700 text-sm font-medium">View Agreement</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5" class="px-6 py-12 text-center text-gray-500">No staff members yet. Add your first staff member above.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

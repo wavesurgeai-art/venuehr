@@ -1,0 +1,11 @@
+hraas.db
+hraas.db-shm
+hraas.db-wal
+__pycache__/
+*.pyc
+flask.log
+*.log
+static/uploads/*.png
+static/uploads/*.jpg
+.env
+.DS_Store

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}{{ staff.name }} — VenueHR{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <a href="{{ url_for('staff_list') }}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Staff</a>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+    <div class="flex justify-between items-start mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">{{ staff.name }}</h1>
+            <p class="text-gray-500 capitalize">{{ staff.role }}</p>
+        </div>
+        <div>
+            {% if staff.agreement_status == 'signed' %}
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800">Agreement Signed</span>
+            {% elif staff.agreement_status == 'pending' %}
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800">Pending</span>
+            {% else %}
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800">Expired</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+            <h3 class="text-sm font-medium text-gray-500 mb-2">Contact Information</h3>
+            <div class="space-y-2">
+                <p><span class="text-gray-700">Email:</span> <a href="mailto:{{ staff.email }}" class="text-rose-600 hover:underline">{{ staff.email }}</a></p>
+                <p><span class="text-gray-700">Phone:</span> {{ staff.phone or '—' }}</p>
+            </div>
+        </div>
+        <div>
+            <h3 class="text-sm font-medium text-gray-500 mb-2">Employment Details</h3>
+            <div class="space-y-2">
+                <p><span class="text-gray-700">Role:</span> {{ staff.role }}</p>
+                <p><span class="text-gray-700">Hire Date:</span> {{ staff.hire_date or '—' }}</p>
+                <p><span class="text-gray-700">Added:</span> {{ staff.created_at[:10] }}</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-8 pt-6 border-t border-gray-200 flex gap-4">
+        {% if staff.agreement_status == 'pending' %}
+        <form method="POST" action="{{ url_for('resend_link', staff_id=staff.id) }}">
+            <button type="submit" class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">Resend Onboarding Link</button>
+        </form>
+        {% endif %}
+        {% if staff.agreement_status == 'signed' %}
+        <a href="{{ url_for('view_agreement', staff_id=staff.id) }}" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">View Signed Agreement</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

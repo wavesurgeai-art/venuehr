@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — VenueHR{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-2xl font-bold text-gray-900">Dashboard</h1>
+    <p class="text-gray-500">Overview of staff compliance</p>
+</div>
+
+<!-- Stats Cards -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        <div class="text-sm text-gray-500 mb-1">Total Staff</div>
+        <div class="text-3xl font-bold text-gray-900">{{ total }}</div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        <div class="text-sm text-gray-500 mb-1">Pending Agreements</div>
+        <div class="text-3xl font-bold text-amber-600">{{ pending }}</div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        <div class="text-sm text-gray-500 mb-1">Signed Agreements</div>
+        <div class="text-3xl font-bold text-emerald-600">{{ signed }}</div>
+    </div>
+</div>
+
+<!-- Compliance Rate -->
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 mb-8">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-gray-900">Compliance Rate</h2>
+        <span class="text-2xl font-bold text-rose-600">{{ compliance_rate }}%</span>
+    </div>
+    <div class="w-full bg-gray-200 rounded-full h-3">
+        <div class="bg-rose-600 h-3 rounded-full transition-all" style="width: {{ compliance_rate }}%"></div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
+    <div class="flex gap-4">
+        <a href="{{ url_for('staff_list') }}" class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition">
+            View All Staff
+        </a>
+        <a href="{{ url_for('staff_list') }}" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
+            Add New Staff
+        </a>
+    </div>
+</div>
+{% endblock %}

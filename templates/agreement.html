@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Staff Agreement — VenueHR{% endblock %}
+
+{% block extra_head %}
+<style>
+    .sig-canvas { border: 2px dashed #d1d5db; border-radius: 8px; cursor: crosshair; background: #fff; }
+    .sig-canvas.signed { border-color: #10b981; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="text-center mb-8">
+        <h1 class="text-2xl font-bold text-gray-900">Staff Uniform & Professional Conduct Agreement</h1>
+        <p class="text-gray-500 mt-1">Please read carefully and sign below</p>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm p-8 border border-gray-200 mb-6">
+        <div class="prose prose-sm max-w-none text-gray-700 whitespace-pre-line">{{ agreement_text }}</div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm p-8 border border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Your Signature</h2>
+        <p class="text-sm text-gray-500 mb-4">Draw your signature in the box below using your mouse or touchscreen.</p>
+
+        <div class="flex gap-4 mb-6">
+            <button type="button" id="clearBtn" class="text-sm text-gray-600 hover:text-gray-800 border border-gray-300 px-3 py-1 rounded">Clear</button>
+            <button type="button" id="undoBtn" class="text-sm text-gray-600 hover:text-gray-800 border border-gray-300 px-3 py-1 rounded">Undo</button>
+        </div>
+
+        <canvas id="sigCanvas" class="sig-canvas w-full h-40"></canvas>
+
+        <form method="POST" id="agreeForm" class="mt-6">
+            <input type="hidden" name="signature_data" id="signature_data">
+
+            <div class="flex items-start gap-3 mb-6">
+                <input type="checkbox" id="acknowledge" name="acknowledge" required class="mt-1 h-4 w-4 text-rose-600 border-gray-300 rounded focus:ring-rose-500">
+                <label for="acknowledge" class="text-sm text-gray-700">
+                    I have read and understand the Staff Uniform & Professional Conduct Agreement above. 
+                    I agree to comply with all terms and conditions outlined.
+                </label>
+            </div>
+
+            <button type="submit" id="submitBtn" disabled
+                    class="w-full bg-rose-600 text-white py-3 rounded-lg font-medium hover:bg-rose-700 transition disabled:bg-gray-300 disabled:cursor-not-allowed">
+                Submit Signed Agreement
+            </button>
+        </form>
+    </div>
+</div>
+
+<script>
+(function() {
+    const canvas = document.getElementById('sigCanvas');
+    const ctx = canvas.getContext('2d');
+    const clearBtn = document.getElementById('clearBtn');
+    const undoBtn = document.getElementById('undoBtn');
+    const submitBtn = document.getElementById('submitBtn');
+    const agreeCheck = document.getElementById('acknowledge');
+    const sigInput = document.getElementById('signature_data');
+
+    let drawing = false;
+    let paths = [];
+    let currentPath = [];
+
+    function resizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+        ctx.strokeStyle = '#1f2937';
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    function getPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return { x: clientX - rect.left, y: clientY - rect.top };
+    }
+
+    function startDraw(e) {
+        e.preventDefault();
+        drawing = true;
+        currentPath = [getPos(e)];
+    }
+
+    function draw(e) {
+        if (!drawing) return;
+        e.preventDefault();
+        const pos = getPos(e);
+        currentPath.push(pos);
+        ctx.beginPath();
+        ctx.moveTo(currentPath[currentPath.length - 2].x, currentPath[currentPath.length - 2].y);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+    }
+
+    function endDraw(e) {
+        if (!drawing) return;
+        drawing = false;
+        if (currentPath.length > 0) {
+            paths.push([...currentPath]);
+            currentPath = [];
+            canvas.classList.add('signed');
+        }
+    }
+
+    canvas.addEventListener('mousedown', startDraw);
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', endDraw);
+    canvas.addEventListener('mouseleave', endDraw);
+    canvas.addEventListener('touchstart', startDraw);
+    canvas.addEventListener('touchmove', draw);
+    canvas.addEventListener('touchend', endDraw);
+
+    function redraw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        paths.forEach(path => {
+            if (path.length < 2) return;
+            ctx.beginPath();
+            ctx.moveTo(path[0].x, path[0].y);
+            for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+            ctx.stroke();
+        });
+    }
+
+    clearBtn.addEventListener('click', () => {
+        paths = [];
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.classList.remove('signed');
+        sigInput.value = '';
+    });
+
+    undoBtn.addEventListener('click', () => {
+        if (paths.length > 0) {
+            paths.pop();
+            redraw();
+            if (paths.length === 0) canvas.classList.remove('signed');
+        }
+    });
+
+    agreeCheck.addEventListener('change', () => {
+        submitBtn.disabled = !agreeCheck.checked;
+    });
+
+    document.getElementById('agreeForm').addEventListener('submit', (e) => {
+        if (paths.length === 0) {
+            e.preventDefault();
+            alert('Please provide your signature before submitting.');
+            return;
+        }
+        sigInput.value = canvas.toDataURL('image/png');
+    });
+})();
+</script>
+{% endblock %}

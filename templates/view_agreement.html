@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Signed Agreement — VenueHR{% endblock %}
+
+{% block content %}
+<div class="mb-8 flex justify-between items-center">
+    <div>
+        <a href="{{ url_for('staff_list') }}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Staff</a>
+        <h1 class="text-2xl font-bold text-gray-900 mt-2">Signed Agreement</h1>
+    </div>
+    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800">Signed</span>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm p-8 border border-gray-200 mb-6">
+    <div class="grid grid-cols-2 gap-6 mb-6 pb-6 border-b border-gray-200">
+        <div>
+            <p class="text-sm text-gray-500">Signed At</p>
+            <p class="font-medium text-gray-900">{{ agreement.signed_at[:19].replace('T', ' ') }} UTC</p>
+        </div>
+        <div>
+            <p class="text-sm text-gray-500">IP Address</p>
+            <p class="font-medium text-gray-900">{{ agreement.ip_address or '—' }}</p>
+        </div>
+    </div>
+
+    <h3 class="text-sm font-medium text-gray-500 mb-3">Signature on File</h3>
+    {% if agreement.signature_image %}
+    <img src="{{ url_for('serve_signature', filename=agreement.signature_image) }}"
+         alt="Staff Signature" class="border border-gray-200 rounded-lg max-w-md mb-6">
+    {% else %}
+    <p class="text-gray-400 italic mb-6">No signature image available</p>
+    {% endif %}
+</div>
+
+<div class="bg-white rounded-xl shadow-sm p-8 border border-gray-200">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Agreement Text (as signed)</h2>
+    <div class="prose prose-sm max-w-none text-gray-700 whitespace-pre-line">{{ agreement.agreement_text }}</div>
+</div>
+{% endblock %}
