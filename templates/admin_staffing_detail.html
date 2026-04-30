@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}{{ event.name }} Staffing — VenueHR{% endblock %}
+
+{% block content %}
+<div class="mb-8 flex items-center justify-between">
+    <div>
+        <div class="text-sm text-gray-500 mb-1">
+            <a href="{{ url_for('staffing_matrix') }}" class="hover:text-rose-600">← Staffing Matrix</a>
+        </div>
+        <h1 class="text-2xl font-bold text-gray-900">{{ event.name }}</h1>
+        <p class="text-gray-500">{{ event.date }} · {{ event.guest_count }} guests</p>
+    </div>
+    <form method="POST" action="{{ url_for('staffing_broadcast', event_id=event.id) }}">
+        <button type="submit" class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">
+            📱 Broadcast Availability Request
+        </button>
+    </form>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+    <!-- Required Staffing -->
+    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Required Headcount</h2>
+        <div class="space-y-3">
+            {% for role, needed in required.items() %}
+            {% if needed > 0 %}
+            <div class="flex items-center justify-between">
+                <span class="text-gray-700">{{ role }}</span>
+                <span class="font-bold text-gray-900">{{ needed }}</span>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        <p class="text-xs text-gray-400 mt-4">
+            Servers: 1 per 20 guests · Bartenders: 1 per 50 · Event Lead: 1 if &gt;50 guests · Security/Parking: 1 per 100
+        </p>
+    </div>
+
+    <!-- Add Staff -->
+    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Assign Staff</h2>
+        <form method="POST">
+            <input type="hidden" name="action" value="assign_staff">
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Staff Member</label>
+                    <select name="staff_id" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                        <option value="">Select staff...</option>
+                        {% for s in all_staff %}
+                        <option value="{{ s.id }}">{{ s.name }} ({{ s.role }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                    <select name="role" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                        <option value="">Select role...</option>
+                        <option value="Server">Server</option>
+                        <option value="Bartender">Bartender</option>
+                        <option value="Event Lead">Event Lead</option>
+                        <option value="Security/Parking">Security/Parking</option>
+                    </select>
+                </div>
+                <button type="submit" class="w-full bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">
+                    Assign to Event
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Assigned Staff -->
+<div class="bg-white rounded-xl shadow-sm border border-gray-200">
+    <div class="p-6 border-b border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900">Assigned Staff</h2>
+    </div>
+    {% if assignments %}
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left text-gray-500 border-b">
+                <th class="p-4 font-medium">Name</th>
+                <th class="p-4 font-medium">Role</th>
+                <th class="p-4 font-medium">Status</th>
+                <th class="p-4 font-medium">Actions</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for a in assignments %}
+            <tr>
+                <td class="p-4 font-medium text-gray-900">
+                    {{ a.staff_name }}
+                    <div class="text-xs text-gray-400">{{ a.staff_phone or 'No phone' }}</div>
+                </td>
+                <td class="p-4 text-gray-700">{{ a.role }}</td>
+                <td class="p-4">
+                    {% if a.confirmed %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Confirmed</span>
+                    {% else %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Pending</span>
+                    {% endif %}
+                </td>
+                <td class="p-4">
+                    <div class="flex gap-2">
+                        {% if not a.confirmed %}
+                        <form method="POST" class="inline">
+                            <input type="hidden" name="action" value="confirm_staff">
+                            <input type="hidden" name="staffing_id" value="{{ a.id }}">
+                            <button type="submit" class="text-emerald-600 hover:text-emerald-700 text-sm font-medium">Confirm</button>
+                        </form>
+                        {% endif %}
+                        <form method="POST" class="inline">
+                            <input type="hidden" name="action" value="remove_staff">
+                            <input type="hidden" name="staffing_id" value="{{ a.id }}">
+                            <button type="submit" class="text-red-600 hover:text-red-700 text-sm font-medium">Remove</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="p-12 text-center text-gray-400">
+        No staff assigned yet. Use the form above to assign team members.
+    </div>
+    {% endif %}
+</div>
+
+<!-- Staffing Gaps -->
+<div class="mt-6 bg-amber-50 rounded-xl p-6 border border-amber-200">
+    <h2 class="text-lg font-semibold text-amber-900 mb-3">Staffing Gaps</h2>
+    {% if gaps %}
+    <div class="space-y-2">
+        {% for gap in gaps %}
+        <div class="flex items-center gap-2 text-amber-800">
+            <span class="font-medium">{{ gap.role }}:</span>
+            <span>Need {{ gap.needed }}, have {{ gap.have }} → <strong>Short by {{ gap.short }}</strong></span>
+        </div>
+        {% endfor %}
+    </div>
+    <p class="text-sm text-amber-700 mt-3">Click "Broadcast Availability Request" to text unassigned staff.</p>
+    {% else %}
+    <p class="text-amber-800">All roles fully staffed! ✓</p>
+    {% endif %}
+</div>
+{% endblock %}

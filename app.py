@@ -129,6 +129,31 @@ def init_db():
         id INTEGER PRIMARY KEY CHECK (id = 1),
         venue_name TEXT NOT NULL DEFAULT 'Our Venue'
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS events (
+        id TEXT PRIMARY KEY,
+        date TEXT NOT NULL,
+        name TEXT NOT NULL,
+        guest_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS event_staffing (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        staff_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        confirmed INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (event_id) REFERENCES events(id),
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS availability_requests (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        sent_at TEXT NOT NULL,
+        responded INTEGER NOT NULL DEFAULT 0,
+        response TEXT,
+        FOREIGN KEY (event_id) REFERENCES events(id)
+    )''')
     # Seed default venue config
     c.execute('INSERT OR IGNORE INTO venue_config (id, venue_name) VALUES (1, ?)', ('Our Venue',))
     # Create default admin if none exists (PIN: 1234)
@@ -448,7 +473,168 @@ def admin_faq_delete(faq_id):
     flash('FAQ deleted.', 'success')
     return redirect(url_for('admin_faqs'))
 
-# ─── Twilio SMS Auto-Reply (FAQ) ─────────────────────────────────────────────
+# ─── Staffing Matrix Routes ───────────────────────────────────────────────────
+
+@app.route('/admin/staffing', methods=['GET', 'POST'])
+@login_required
+def staffing_matrix():
+    """Staffing calculator and event staffing management."""
+    conn = get_db()
+    c = conn.cursor()
+
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'create_event':
+            event_id = str(uuid.uuid4())
+            c.execute('''INSERT INTO events (id, date, name, guest_count, created_at)
+                         VALUES (?, ?, ?, ?, ?)''',
+                     (event_id, request.form.get('date'), request.form.get('name'),
+                      int(request.form.get('guest_count', 0)), datetime.utcnow().isoformat()))
+            conn.commit()
+            flash(f'Event created.', 'success')
+        elif action == 'assign_staff':
+            event_id = request.form.get('event_id')
+            staff_id = request.form.get('staff_id')
+            role = request.form.get('role')
+            c.execute('SELECT id FROM event_staffing WHERE event_id=? AND staff_id=?', (event_id, staff_id))
+            if not c.fetchone():
+                c.execute('INSERT INTO event_staffing (id, event_id, staff_id, role, confirmed) VALUES (?, ?, ?, ?, 0)',
+                          (str(uuid.uuid4()), event_id, staff_id, role))
+                conn.commit()
+                flash('Staff assigned.', 'success')
+        elif action == 'confirm_staff':
+            staffing_id = request.form.get('staffing_id')
+            c.execute('UPDATE event_staffing SET confirmed=1 WHERE id=?', (staffing_id,))
+            conn.commit()
+            flash('Staff confirmed.', 'success')
+        elif action == 'remove_staff':
+            staffing_id = request.form.get('staffing_id')
+            c.execute('DELETE FROM event_staffing WHERE id=?', (staffing_id,))
+            conn.commit()
+            flash('Staff removed.', 'success')
+        conn.close()
+        return redirect(url_for('staffing_matrix'))
+
+    # Load events
+    c.execute('SELECT * FROM events ORDER BY date DESC')
+    events = c.fetchall()
+
+    # Load staff pool
+    c.execute('SELECT * FROM staff ORDER BY name')
+    all_staff = c.fetchall()
+
+    conn.close()
+    return render_template('admin_staffing.html', events=events, all_staff=all_staff, admin_name=session.get('admin_name'))
+
+@app.route('/admin/staffing/<event_id>')
+@login_required
+def staffing_detail(event_id):
+    """Staffing plan for a specific event."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM events WHERE id=?', (event_id,))
+    event = c.fetchone()
+    if not event:
+        flash('Event not found.', 'error')
+        return redirect(url_for('staffing_matrix'))
+    c.execute('''SELECT es.*, s.name as staff_name, s.phone as staff_phone
+                 FROM event_staffing es JOIN staff s ON es.staff_id=s.id
+                 WHERE es.event_id=?''', (event_id,))
+    assignments = c.fetchall()
+    c.execute('SELECT * FROM staff ORDER BY name')
+    all_staff = c.fetchall()
+    conn.close()
+
+    guest_count = event['guest_count']
+    # Staffing ratios
+    required = {
+        'Server': max(1, guest_count // 20),
+        'Bartender': max(1, guest_count // 50),
+        'Event Lead': 1 if guest_count > 50 else 0,
+        'Security/Parking': max(1, guest_count // 100),
+    }
+    # Compute gaps
+    assigned_by_role = {}
+    for a in assignments:
+        assigned_by_role[a['role']] = assigned_by_role.get(a['role'], 0) + 1
+    gaps = []
+    for role, needed in required.items():
+        if needed > 0:
+            have = assigned_by_role.get(role, 0)
+            if have < needed:
+                gaps.append({'role': role, 'needed': needed, 'have': have, 'short': needed - have})
+
+    return render_template('admin_staffing_detail.html', event=event, assignments=assignments,
+                           all_staff=all_staff, required=required, gaps=gaps, admin_name=session.get('admin_name'))
+
+@app.route('/admin/staffing/<event_id>/broadcast', methods=['POST'])
+@login_required
+def staffing_broadcast(event_id):
+    """Send availability SMS to all unassigned staff."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM events WHERE id=?', (event_id,))
+    event = c.fetchone()
+    if not event:
+        flash('Event not found.', 'error')
+        conn.close()
+        return redirect(url_for('staffing_matrix'))
+
+    c.execute('''SELECT s.* FROM staff s
+                 WHERE s.id NOT IN (SELECT staff_id FROM event_staffing WHERE event_id=?)
+                 ORDER BY s.name''', (event_id,))
+    unassigned = c.fetchall()
+    conn.close()
+
+    # Send SMS to each
+    venue_name = get_venue_name()
+    msg = (f"Hi! {venue_name} needs staff for an upcoming event.\n\n"
+           f"Event: {event['name']}\n"
+           f"Date: {event['date']}\n"
+           f"Guests: {event['guest_count']}\n\n"
+           f"Reply CONFIRM if you're available, or DECLINE if not.")
+
+    sent = 0
+    for staff in unassigned:
+        if staff['phone']:
+            send_sms_alert(staff['phone'], msg)
+            sent += 1
+
+    flash(f'Availability request sent to {sent} staff members.', 'success')
+    return redirect(url_for('staffing_detail', event_id=event_id))
+
+@app.route('/admin/events', methods=['GET', 'POST'])
+@login_required
+def events_list():
+    """List and manage events."""
+    conn = get_db()
+    c = conn.cursor()
+    if request.method == 'POST':
+        event_id = str(uuid.uuid4())
+        c.execute('INSERT INTO events (id, date, name, guest_count, created_at) VALUES (?, ?, ?, ?, ?)',
+                  (event_id, request.form.get('date'), request.form.get('name'),
+                   int(request.form.get('guest_count', 0)), datetime.utcnow().isoformat()))
+        conn.commit()
+        flash('Event created.', 'success')
+    c.execute('SELECT * FROM events ORDER BY date DESC')
+    events = c.fetchall()
+    conn.close()
+    return render_template('admin_events.html', events=events, admin_name=session.get('admin_name'))
+
+def send_sms_alert(phone, message):
+    """Send an outbound SMS (uses Twilio if configured)."""
+    if not phone:
+        return
+    try:
+        from twilio.rest import Client
+        from twilio.twiml.messaging_response import MessagingResponse
+        if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER:
+            client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+            client.messages.create(body=message, from_=TWILIO_PHONE_NUMBER, to=phone)
+    except Exception:
+        app.logger.warning(f'Could not send SMS to {phone}')
+
+
 
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')

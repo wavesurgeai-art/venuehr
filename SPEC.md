@@ -203,7 +203,34 @@ The `/admin` dashboard includes an **Onboarding Status** table showing all activ
 
 ---
 
-## 5. API Endpoints
+## 5. Staffing Matrix
+
+Venue managers can create events, assign staff, and calculate required headcount using staffing ratios.
+
+### Staffing Ratios
+| Role | Ratio |
+|------|-------|
+| Servers | 1 per 20 guests |
+| Bartenders | 1 per 50 guests |
+| Event Leads | 1 if event exceeds 50 guests |
+| Security/Parking | 1 per 100 guests |
+
+### New Tables
+**events** — stores event metadata (date, name, guest_count)
+
+**event_staffing** — tracks which staff are assigned to which event and whether confirmed
+
+**availability_requests** — logs broadcast SMS sent to staff asking for availability
+
+### Routes
+- `GET /admin/staffing` — Staffing calculator with event list and create form
+- `GET /admin/staffing/<event_id>` — Per-event staffing plan with required vs. assigned counts, gap detection, and assign/confirm/remove actions
+- `POST /admin/staffing/<event_id>/broadcast` — Sends availability SMS to all unassigned staff; staff reply CONFIRM or DECLINE (Twilio required)
+- `GET/POST /admin/events` — Event management (list/create)
+
+---
+
+## 6. API Endpoints
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|

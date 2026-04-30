@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Staffing Matrix — VenueHR{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-2xl font-bold text-gray-900">Staffing Matrix</h1>
+    <p class="text-gray-500">Calculate required headcount and assign staff to events</p>
+</div>
+
+<!-- Create Event -->
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 mb-8">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Create Event</h2>
+    <form method="POST" class="flex gap-4 flex-wrap items-end">
+        <input type="hidden" name="action" value="create_event">
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Event Name</label>
+            <input name="name" required placeholder="Smith Wedding" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-rose-500 focus:border-rose-500 w-48">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+            <input name="date" type="date" required class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-rose-500 focus:border-rose-500 w-40">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Guest Count</label>
+            <input name="guest_count" type="number" min="1" required placeholder="150" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-rose-500 focus:border-rose-500 w-32">
+        </div>
+        <button type="submit" class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">
+            Create Event
+        </button>
+    </form>
+</div>
+
+<!-- Events List -->
+<div class="bg-white rounded-xl shadow-sm border border-gray-200">
+    <div class="p-6 border-b border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900">Events</h2>
+    </div>
+    {% if events %}
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left text-gray-500 border-b">
+                <th class="p-4 font-medium">Event</th>
+                <th class="p-4 font-medium">Date</th>
+                <th class="p-4 font-medium">Guests</th>
+                <th class="p-4 font-medium">Staffing</th>
+                <th class="p-4 font-medium">Actions</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for event in events %}
+            <tr>
+                <td class="p-4 font-medium text-gray-900">{{ event.name }}</td>
+                <td class="p-4 text-gray-700">{{ event.date }}</td>
+                <td class="p-4 text-gray-700">{{ event.guest_count }}</td>
+                <td class="p-4">
+                    {% set ratios = {'Server': (event.guest_count // 20), 'Bartender': (event.guest_count // 50), 'Event Lead': (1 if event.guest_count > 50 else 0), 'Security/Parking': (event.guest_count // 100)} %}
+                    <div class="flex gap-2 flex-wrap">
+                        {% for role, needed in ratios.items() %}
+                        {% if needed > 0 %}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                            {{ role }}: {{ needed }}
+                        </span>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                </td>
+                <td class="p-4">
+                    <a href="{{ url_for('staffing_detail', event_id=event.id) }}" class="text-rose-600 hover:text-rose-700 font-medium text-sm">
+                        Manage →
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="p-12 text-center text-gray-400">
+        No events yet. Create one above to get started.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
