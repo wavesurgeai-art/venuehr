@@ -454,19 +454,8 @@ def sms_webhook():
         # Find best FAQ match
         answer = find_best_faq_answer(body)
 
-        # Send auto-reply via Twilio
-        if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER:
-            try:
-                client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-                client.messages.create(
-                    body=answer,
-                    from_=TWILIO_PHONE_NUMBER,
-                    to=from_number
-                )
-            except Exception as e:
-                app.logger.error(f'Twilio send error: {e}')
-
-        # Respond with TwiML
+        # Respond with TwiML — Twilio delivers the reply (no separate API call needed)
+        # Outgoing SMS disabled pending A2P 10DLC registration
         from twilio.twiml.messaging_response import MessagingResponse
         resp = MessagingResponse()
         resp.message(answer)
