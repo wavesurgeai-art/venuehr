@@ -438,8 +438,9 @@ def sms_webhook():
     from twilio.rest import Client
     from twilio.request_validator import RequestValidator
 
-    # Validate Twilio signature in production
-    if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+    # Validate Twilio signature (skip for local/Render testing if DISABLE_TWILIO_VALIDATION=1)
+    skip_validation = os.environ.get('DISABLE_TWILIO_VALIDATION', '').lower() == '1'
+    if not skip_validation and TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
         validator = RequestValidator(TWILIO_AUTH_TOKEN)
         signature = request.headers.get('X-Twilio-Signature', '')
         url = request.url
