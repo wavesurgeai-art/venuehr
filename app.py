@@ -5,8 +5,10 @@ Flask application entry point.
 
 import os
 import uuid
+import json
+import re
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from functools import wraps
 
 import bcrypt
@@ -115,6 +117,20 @@ def init_db():
         keywords TEXT NOT NULL,
         created_at TEXT NOT NULL
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS onboarding_state (
+        phone TEXT PRIMARY KEY,
+        step TEXT NOT NULL,
+        data_json TEXT NOT NULL DEFAULT '{}',
+        dob TEXT,
+        assigned_role TEXT,
+        updated_at TEXT NOT NULL
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS venue_config (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        venue_name TEXT NOT NULL DEFAULT 'Our Venue'
+    )''')
+    # Seed default venue config
+    c.execute('INSERT OR IGNORE INTO venue_config (id, venue_name) VALUES (1, ?)', ('Our Venue',))
     # Create default admin if none exists (PIN: 1234)
     c.execute('SELECT id FROM admins LIMIT 1')
     if c.fetchone() is None:
@@ -198,11 +214,21 @@ def dashboard():
     pending = c.fetchone()['pending']
     c.execute("SELECT COUNT(*) as signed FROM staff WHERE agreement_status = 'signed'")
     signed = c.fetchone()['signed']
+    # Onboarding status
+    c.execute("SELECT COUNT(*) as total FROM onboarding_state")
+    onboarding_total = c.fetchone()['total']
+    c.execute("SELECT COUNT(*) as complete FROM onboarding_state WHERE step = 'COMPLETE'")
+    onboarding_complete = c.fetchone()['complete']
+    # Get recent onboarding states
+    c.execute('SELECT phone, step, dob, assigned_role, updated_at FROM onboarding_state ORDER BY updated_at DESC LIMIT 10')
+    onboarding_recent = c.fetchall()
     conn.close()
     compliance_rate = int((signed / total * 100)) if total > 0 else 0
     return render_template('admin_dashboard.html',
                            total=total, pending=pending, signed=signed,
-                           compliance_rate=compliance_rate, admin_name=session.get('admin_name'))
+                           compliance_rate=compliance_rate, admin_name=session.get('admin_name'),
+                           onboarding_total=onboarding_total, onboarding_complete=onboarding_complete,
+                           onboarding_recent=onboarding_recent)
 
 @app.route('/admin/staff', methods=['GET', 'POST'])
 @login_required
@@ -422,20 +448,19 @@ def admin_faq_delete(faq_id):
     flash('FAQ deleted.', 'success')
     return redirect(url_for('admin_faqs'))
 
-# ─── Twilio SMS Auto-Reply ────────────────────────────────────────────────────
+# ─── Twilio SMS Auto-Reply (FAQ) ─────────────────────────────────────────────
 
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
-TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')  # Set in Render env vars
+TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
 
 @app.route('/sms/webhook', methods=['GET', 'POST'])
 def sms_webhook():
-    """Twilio SMS webhook — receives texts and auto-replies with FAQ answers."""
+    """Twilio SMS webhook — routes to onboarding bot or FAQ auto-reply."""
     try:
         if request.method == 'GET':
             return '', 200
 
-        from twilio.rest import Client
         from twilio.request_validator import RequestValidator
 
         # Validate Twilio signature (skip if DISABLE_TWILIO_VALIDATION=1)
@@ -447,15 +472,45 @@ def sms_webhook():
             if not validator.validate(url, request.form, signature):
                 return 'Forbidden', 403
 
-        # Parse incoming SMS
         from_number = request.form.get('From', '')
-        body = request.form.get('Body', '').strip().lower()
+        body = request.form.get('Body', '').strip()
+        upper_body = body.upper()
 
-        # Find best FAQ match
-        answer = find_best_faq_answer(body)
+        # Route: onboarding bot vs. FAQ lookup
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT step, data_json, dob, assigned_role FROM onboarding_state WHERE phone = ?', (from_number,))
+        row = c.fetchone()
+        conn.close()
 
-        # Respond with TwiML — Twilio delivers the reply (no separate API call needed)
-        # Outgoing SMS disabled pending A2P 10DLC registration
+        # If user is in onboarding flow, check global commands first
+        if row and row['step'] != 'COMPLETE':
+            # Global commands even while onboarding
+            if upper_body in ('HELP', 'FAQ', '?'):
+                answer, next_step = HELP_TEXT, None
+            elif upper_body == 'STATUS':
+                answer, next_step = get_onboarding_status(from_number)
+            elif upper_body == 'QUIT':
+                answer, next_step = quit_onboarding(from_number)
+            else:
+                answer, next_step = handle_onboarding_state(from_number, body, row)
+        elif upper_body == 'START' or upper_body.startswith('START '):
+            answer, next_step = start_onboarding(from_number, body)
+        elif upper_body in ('HELP', 'FAQ', '?'):
+            answer, next_step = HELP_TEXT, None
+        elif upper_body == 'STATUS':
+            answer, next_step = get_onboarding_status(from_number)
+        elif upper_body == 'QUIT':
+            answer, next_step = quit_onboarding(from_number)
+        else:
+            # Hand off to FAQ bot
+            answer = find_best_faq_answer(body)
+            next_step = None
+
+        # Persist state if step changed
+        if next_step is not None:
+            save_onboarding_state(from_number, next_step, {})
+
         from twilio.twiml.messaging_response import MessagingResponse
         resp = MessagingResponse()
         resp.message(answer)
@@ -463,6 +518,286 @@ def sms_webhook():
     except Exception as e:
         app.logger.error(f'SMS webhook error: {e}')
         return f'SMS error: {e}', 500
+
+
+# ─── Onboarding State Machine ───────────────────────────────────────────────────
+
+STAGES = ['WELCOME', 'START_RECEIVED', 'DOB_VERIFIED', 'BASIC_INFO', 'TAX_INFO', 'COMPLIANCE_PHOTOS', 'PAYROLL', 'COMPLETE']
+
+HELP_TEXT = ("Commands:\n"
+             "START [DOB] - Begin onboarding (e.g. START 01/15/2000)\n"
+             "STATUS - See your onboarding progress\n"
+             "BACK - Go to previous step\n"
+             "QUIT - Exit and save progress\n"
+             "For other questions, I'll try to find an FAQ answer!")
+
+def get_venue_name() -> str:
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT venue_name FROM venue_config WHERE id = 1')
+    row = c.fetchone()
+    conn.close()
+    return row['venue_name'] if row else 'Our Venue'
+
+def parse_dob(dob_str: str):
+    """Parse MM/DD/YYYY or MM-DD-YYYY date of birth. Returns date or None."""
+    m = re.search(r'(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})', dob_str.strip())
+    if not m:
+        return None
+    try:
+        return date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+    except ValueError:
+        return None
+
+def age_from_dob(dob: date) -> int:
+    today = date.today()
+    age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    return age
+
+def determine_role(age: int) -> str:
+    if age >= 21:
+        return 'Bartender/Lead'
+    elif age >= 18:
+        return 'Server'
+    return 'Under 18'
+
+def start_onboarding(phone: str, body: str):
+    """Initiate onboarding: parse DOB, determine role, send welcome + first question."""
+    dob_str = re.sub(r'^START\s*', '', body.strip(), flags=re.IGNORECASE).strip()
+    dob = parse_dob(dob_str) if dob_str else None
+
+    if not dob:
+        msg = ("To get started, I need your Date of Birth.\n\n"
+               "Please reply with START followed by your DOB in MM/DD/YYYY format.\n"
+               "For example: START 01/15/2000")
+        return msg, 'START_RECEIVED'
+
+    age = age_from_dob(dob)
+    if age < 18:
+        return ("I'm sorry, but you must be at least 18 years old to work at our venue. "
+                "Please contact the venue manager directly if you believe this is an error."), None
+
+    role = determine_role(age)
+    venue_name = get_venue_name()
+
+    # Save state — move directly to BASIC_INFO
+    data = json.dumps({'role': role})
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''INSERT OR REPLACE INTO onboarding_state (phone, step, data_json, dob, assigned_role, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?)''',
+             (phone, 'BASIC_INFO', data, dob.strftime('%m/%d/%Y'), role, datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
+
+    welcome = (f"Hi! Congratulations on joining the team at {venue_name}. "
+               f"I am your AI Onboarding Assistant. My job is to get you set up in our system "
+               f"as quickly as possible so you can get on the schedule and get paid.\n\n"
+               f"To stay compliant with Indiana labor laws and venue safety standards, "
+               f"I'm going to guide you through a few quick steps. "
+               f"Here is what we need to tackle today:\n"
+               f"Basic Info, Tax Documents, Compliance, Payroll.\n\n"
+               f"This usually takes about 5-10 minutes. You can stop and start at any time — "
+               f"I'll remember where we left off.\n\n"
+               f"I've determined you'll be joining as a: {role}\n\n"
+               f"Let's get started!\n\n"
+               f"Reply with your Full Legal Name (as it appears on your ID):")
+
+    return welcome, 'BASIC_INFO'
+
+def handle_onboarding_state(phone: str, body: str, row):
+    """Process the next message in the onboarding state machine."""
+    step = row['step']
+    data = json.loads(row['data_json']) if row['data_json'] else {}
+    dob = row['dob']
+    assigned_role = row['assigned_role']
+    upper_body = body.upper()
+
+    # Global commands
+    if upper_body == 'QUIT':
+        return quit_onboarding(phone)
+
+    if upper_body == 'STATUS':
+        return get_onboarding_status(phone)
+
+    if upper_body == 'BACK':
+        return handle_back(phone, step, data)
+
+    # Step-specific handlers
+    if step == 'START_RECEIVED':
+        return start_onboarding(phone, body)
+
+    elif step == 'BASIC_INFO':
+        return collect_basic_info(phone, body, data, assigned_role, dob)
+
+    elif step == 'TAX_INFO':
+        return collect_tax_info(phone, body, data, assigned_role, dob)
+
+    elif step == 'COMPLIANCE_PHOTOS':
+        return collect_compliance_photos(phone, body, data, assigned_role, dob)
+
+    elif step == 'PAYROLL':
+        return collect_payroll(phone, body, data, assigned_role, dob)
+
+    elif step == 'COMPLETE':
+        return ("You've already completed your onboarding! If you have questions, "
+                "reply HELP or contact your Lead Coordinator."), None
+
+    return ("I'm not sure what step you're on. Reply STATUS to see your progress, "
+            "or START to begin again."), None
+
+def collect_basic_info(phone, body, data, role, dob):
+    data['name'] = body.strip()
+    msg = (f"Got it, {data['name']}!\n\n"
+           f"Reply with your Email Address:")
+    data['step'] = 'TAX_INFO'
+    save_onboarding_state(phone, 'TAX_INFO', data)
+    return msg, 'TAX_INFO'
+
+def collect_tax_info(phone, body, data, role, dob):
+    email = body.strip()
+    if '@' not in email or '.' not in email:
+        return ("That doesn't look like a valid email. Please reply with a valid email address:"), 'TAX_INFO'
+    data['email'] = email
+    data['step'] = 'COMPLIANCE_PHOTOS'
+    save_onboarding_state(phone, 'COMPLIANCE_PHOTOS', data)
+    return ("Great!\n\n"
+            "Next, Compliance Photos.\n\n"
+            "Please reply with a photo of yourself in your work uniform "
+            "(solid black button-down shirt, black dress slacks, black non-slip shoes). "
+            "This will be used for your staff ID badge."), 'COMPLIANCE_PHOTOS'
+
+def collect_compliance_photos(phone, body, data, role, dob):
+    # Body contains media URL if photo was sent, or a text response
+    num_photos = data.get('photo_count', 0) + 1
+    data['photo_count'] = num_photos
+    data['step'] = 'PAYROLL'
+    save_onboarding_state(phone, 'PAYROLL', data)
+    return ("Thanks! Your compliance photo has been received.\n\n"
+            "Finally, Payroll.\n\n"
+            "Do you have Direct Deposit set up?\n\n"
+            "Reply YES if you want to provide bank info now, or REPLY LATER to skip."), 'PAYROLL'
+
+def collect_payroll(phone, body, data, role, dob):
+    upper = body.strip().upper()
+    if upper in ('YES', 'Y'):
+        data['payroll'] = 'pending_bank_info'
+        save_onboarding_state(phone, 'PAYROLL', data)
+        return ("Great! Please provide your bank info:\n\n"
+                "Bank Name:"), 'PAYROLL'
+    elif upper in ('LATER', 'NO', 'N', 'SKIP'):
+        data['payroll'] = 'later'
+        return finish_onboarding(phone, data)
+    else:
+        return ("Please reply YES to provide bank info now, or LATER to skip:"), 'PAYROLL'
+
+def handle_back(phone, step, data):
+    """Go back one step in the onboarding flow."""
+    step_order = ['WELCOME', 'START_RECEIVED', 'DOB_VERIFIED', 'BASIC_INFO', 'TAX_INFO', 'COMPLIANCE_PHOTOS', 'PAYROLL', 'COMPLETE']
+    try:
+        idx = step_order.index(step)
+    except ValueError:
+        return ("I'm not sure what step you're on. Reply STATUS to check your progress."), None
+
+    if idx <= 1:
+        return ("You're at the beginning! Reply START to begin onboarding."), step
+
+    prev_step = step_order[idx - 1]
+    # Reset data for the previous step
+    save_onboarding_state(phone, prev_step, {})
+    return (f"No problem! Let's go back.\n\n"
+            f"(Returned to: {prev_step.replace('_', ' ').title()})\n\n"
+            f"Reply BACK again to go further back, or continue when ready."), prev_step
+
+def get_onboarding_status(phone):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT step, data_json, dob, assigned_role FROM onboarding_state WHERE phone = ?', (phone,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return ("You haven't started onboarding yet. Reply START to begin!"), None
+
+    step = row['step']
+    data = json.loads(row['data_json']) if row['data_json'] else {}
+    role = row['assigned_role'] or 'Unknown'
+
+    if step == 'COMPLETE':
+        return (f"Onboarding Status: COMPLETE ✓\n\n"
+                f"Your onboarding is all done! Welcome to the team.\n\n"
+                f"Reply HELP if you need assistance."), None
+
+    steps_display = {
+        'WELCOME': 'Welcome',
+        'START_RECEIVED': 'Awaiting DOB',
+        'DOB_VERIFIED': 'DOB Verified',
+        'BASIC_INFO': 'Basic Info',
+        'TAX_INFO': 'Tax Info',
+        'COMPLIANCE_PHOTOS': 'Compliance Photos',
+        'PAYROLL': 'Payroll',
+    }
+
+    status = f"Step: {steps_display.get(step, step)}\nRole: {role}\n\n"
+    remaining = {
+        'DOB_VERIFIED': 'Basic Info, Tax Documents, Compliance, Payroll',
+        'BASIC_INFO': 'Tax Documents, Compliance, Payroll',
+        'TAX_INFO': 'Compliance, Payroll',
+        'COMPLIANCE_PHOTOS': 'Payroll',
+        'PAYROLL': 'Finish up!',
+    }
+    if step in remaining:
+        status += f"Remaining: {remaining[step]}\n\n"
+    status += "Reply BACK to go to previous step, or QUIT to save and exit."
+
+    return status, None
+
+def quit_onboarding(phone):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT step FROM onboarding_state WHERE phone = ?', (phone,))
+    row = c.fetchone()
+    conn.close()
+    if row and row['step'] != 'COMPLETE':
+        return ("Your progress has been saved! Reply STATUS to pick up where you left off, "
+                "or START to begin again."), None
+    return ("You've quit onboarding. Reply START when you're ready to begin again."), None
+
+def finish_onboarding(phone, data):
+    """Complete onboarding — save final data and send completion message."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''UPDATE onboarding_state SET step = 'COMPLETE', updated_at = ? WHERE phone = ?''',
+              (datetime.utcnow().isoformat(), phone))
+    conn.commit()
+    conn.close()
+    name = data.get('name', 'there')
+    return (f"Congratulations, {name}! 🎉\n\n"
+            f"You've completed your onboarding!\n\n"
+            f"What's next?\n"
+            f"1. Check your email for a link to sign your Staff Agreement\n"
+            f"2. Complete the uniform compliance form\n"
+            f"3. You're ready to be added to the schedule!\n\n"
+            f"Questions? Reply HELP or contact your Lead Coordinator.\n\n"
+            f"Welcome to the team!"), 'COMPLETE'
+
+def save_onboarding_state(phone: str, step: str, data: dict):
+    """Persist onboarding state to DB."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT data_json, dob, assigned_role FROM onboarding_state WHERE phone = ?', (phone,))
+    row = c.fetchone()
+    dob = row['dob'] if row else None
+    assigned_role = row['assigned_role'] if row else None
+    if step == 'DOB_VERIFIED' and isinstance(data, dict) and 'role' in data:
+        assigned_role = data['role']
+    merged = dict(json.loads(row['data_json'])) if row and row['data_json'] and row['data_json'] not in ('', '{}') else {}
+    merged.update(data)
+    c.execute('''INSERT OR REPLACE INTO onboarding_state (phone, step, data_json, dob, assigned_role, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?)''',
+             (phone, step, json.dumps(merged), dob, assigned_role, datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
 
 def find_best_faq_answer(query: str) -> str:
     """Search FAQ database for best matching answer."""
@@ -491,7 +826,6 @@ def find_best_faq_answer(query: str) -> str:
                     score += 3
                 elif word in kw or kw in word:
                     score += 1
-        # Bonus: query words appearing in question/answer
         full_text = (faq['question'] + ' ' + faq['answer']).lower()
         for word in query_words:
             if word in full_text:

@@ -35,6 +35,47 @@
     </div>
 </div>
 
+<!-- Onboarding Status -->
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 mb-8">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-gray-900">SMS Onboarding Bot</h2>
+        <div class="flex gap-4 text-sm">
+            <span class="text-gray-500">{{ onboarding_total }} started</span>
+            <span class="text-emerald-600 font-medium">{{ onboarding_complete }} complete</span>
+        </div>
+    </div>
+    {% if onboarding_recent %}
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left text-gray-500 border-b">
+                <th class="pb-2">Phone</th>
+                <th class="pb-2">Role</th>
+                <th class="pb-2">Step</th>
+                <th class="pb-2">Last Updated</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for s in onboarding_recent %}
+            <tr>
+                <td class="py-2 font-mono text-gray-700">{{ s.phone }}</td>
+                <td class="py-2 text-gray-700">{{ s.assigned_role or '—' }}</td>
+                <td class="py-2">
+                    {% if s.step == 'COMPLETE' %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Complete</span>
+                    {% else %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">{{ s.step.replace('_', ' ') }}</span>
+                    {% endif %}
+                </td>
+                <td class="py-2 text-gray-500">{{ s.updated_at[:16] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-sm text-gray-400">No one has started SMS onboarding yet. Share your Twilio number with new hires!</p>
+    {% endif %}
+</div>
+
 <!-- Quick Actions -->
 <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
     <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>

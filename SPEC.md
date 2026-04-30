@@ -141,9 +141,69 @@ The agreement text (all 4 sections):
 | signature_image | TEXT | Path to signature PNG |
 | agreement_text | TEXT | Snapshot of agreement content at signing |
 
+**faqs**
+| Column | Type | Description |
+|--------|------|-------------|
+| id | TEXT (UUID) | Primary key |
+| category | TEXT | FAQ category (Logistics, Schedule, etc.) |
+| question | TEXT | Question text |
+| answer | TEXT | Answer text |
+| keywords | TEXT | Comma-separated keyword tags for search |
+| created_at | TEXT | ISO timestamp |
+
+**onboarding_state**
+| Column | Type | Description |
+|--------|------|-------------|
+| phone | TEXT | Primary key — staff phone number |
+| step | TEXT | Current state: WELCOME → START_RECEIVED → DOB_VERIFIED → BASIC_INFO → TAX_INFO → COMPLIANCE_PHOTOS → PAYROLL → COMPLETE |
+| data_json | TEXT | JSON blob — collected name, email, role, photo count, payroll choice |
+| dob | TEXT | Date of birth (MM/DD/YYYY) |
+| assigned_role | TEXT | Server (18+) or Bartender/Lead (21+) |
+| updated_at | TEXT | ISO timestamp |
+
+**venue_config**
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Primary key (always 1) |
+| venue_name | TEXT | Venue display name used in SMS messages |
+
 ---
 
-## 4. API Endpoints
+## 4. SMS Onboarding Bot
+
+The platform includes a **conversational SMS onboarding bot** accessible via Twilio webhooks at `/sms/webhook`.
+
+### Welcome Message (exact text sent on START)
+```
+Hi [Employee Name]! Congratulations on joining the team at [Venue Name]. I am your AI Onboarding Assistant. My job is to get you set up in our system as quickly as possible so you can get on the schedule and get paid. To stay compliant with Indiana labor laws and venue safety standards, I'm going to guide you through a few quick steps. Here is what we need to tackle today: Basic Info, Tax Documents, Compliance, Payroll. This usually takes about 5-10 minutes. You can stop and start at any time — I'll remember where we left off. Whenever you're ready to start, just reply with 'START' and your Date of Birth (MM/DD/YYYY).
+```
+
+### State Machine
+```
+WELCOME → START_RECEIVED → DOB_VERIFIED → BASIC_INFO → TAX_INFO → COMPLIANCE_PHOTOS → PAYROLL → COMPLETE
+```
+
+### Role Assignment Logic
+- **18+** → Server role
+- **21+** → Bartender/Lead role
+- **Under 18** → Rejected with contact-manager message
+
+### Commands
+| Command | Description |
+|---------|-------------|
+| `START [DOB]` | Begin onboarding (e.g. `START 01/15/2000`) |
+| `BACK` | Go back one step |
+| `STATUS` | Show current step and remaining items |
+| `QUIT` | Save progress and pause |
+| `HELP` | Show command list |
+| (any other text) | Falls back to FAQ auto-reply |
+
+### Admin View
+The `/admin` dashboard includes an **Onboarding Status** table showing all active SMS onboarding sessions — phone, assigned role, current step, and last update time.
+
+---
+
+## 5. API Endpoints
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
