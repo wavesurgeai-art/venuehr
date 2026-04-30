@@ -230,7 +230,50 @@ Venue managers can create events, assign staff, and calculate required headcount
 
 ---
 
-## 6. API Endpoints
+## 6. Timesheet & Payroll
+
+Staff clock in/out via SMS (text IN/OUT) and managers export payroll as CSV.
+
+### SMS Commands
+| Command | Description |
+|---------|-------------|
+| `IN` | Clock in (verifies staff is on confirmed list for today's event) |
+| `OUT` | Clock out, calculates hours (rounded to nearest 15 min), asks break compliance |
+| `YES/NO` | Respond to breaktaken compliance question |
+| `PAYROLL EXPORT` | Reply with link to CSV download |
+
+### Clock-In Rules
+- Staff must be on the **confirmed** staff list for **today's event**
+- Already-clock-in blocked with existing timestamp
+- Records timestamp + GPS location if available
+
+### Clock-Out Rules
+- Calculates hours worked (rounded to nearest 15 min)
+- Prompts for 30-minute break compliance (YES/NO)
+- Break responses stored in `clock_entries.break_taken`
+
+### Manager Alert
+- If staff is clocked in 12+ hours with no clock-out → SMS alert to `venue_config.manager_phone`
+- `manager_phone` added to `venue_config` table
+
+### Payroll Export
+- CSV columns: Employee ID | Name | Role | Date | Clock In | Clock Out | Hours Worked | Break Taken | Hourly Rate | Total Pay
+- Default hourly rates: Bartender $18, Server $15, Event Lead $22, Security $16
+- Rounds to nearest 15 min
+- Admin downloads from `/admin/payroll_export`
+
+### New Tables
+- `clock_entries` — clock_in, clock_out, location, break_taken per staff/event
+- `manager_alerts` — logs 12-hour shift alerts sent to manager
+
+### Routes
+- `GET /admin/timesheets` — Admin view of all timesheet entries
+- `GET /admin/payroll_export` — Download payroll CSV
+- `POST /sms/webhook` — Handles IN/OUT/YES/NO/PAYROLL EXPORT commands
+
+---
+
+## 7. API Endpoints
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|

@@ -127,7 +127,8 @@ def init_db():
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS venue_config (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        venue_name TEXT NOT NULL DEFAULT 'Our Venue'
+        venue_name TEXT NOT NULL DEFAULT 'Our Venue',
+        manager_phone TEXT DEFAULT ''
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
@@ -153,6 +154,27 @@ def init_db():
         responded INTEGER NOT NULL DEFAULT 0,
         response TEXT,
         FOREIGN KEY (event_id) REFERENCES events(id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS clock_entries (
+        id TEXT PRIMARY KEY,
+        staff_id TEXT NOT NULL,
+        event_id TEXT,
+        clock_in TEXT NOT NULL,
+        clock_out TEXT,
+        location TEXT,
+        break_taken INTEGER DEFAULT 0,
+        FOREIGN KEY (staff_id) REFERENCES staff(id),
+        FOREIGN KEY (event_id) REFERENCES events(id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS manager_alerts (
+        id TEXT PRIMARY KEY,
+        staff_id TEXT NOT NULL,
+        event_id TEXT,
+        alert_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        sent_at TEXT NOT NULL,
+        acknowledged INTEGER DEFAULT 0,
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
     )''')
     # Seed default venue config
     c.execute('INSERT OR IGNORE INTO venue_config (id, venue_name) VALUES (1, ?)', ('Our Venue',))
@@ -635,6 +657,278 @@ def send_sms_alert(phone, message):
         app.logger.warning(f'Could not send SMS to {phone}')
 
 
+# ─── Timesheet / Clock In-Out Module ───────────────────────────────────────────
+
+def get_manager_phone():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT manager_phone FROM venue_config WHERE id=1')
+    row = c.fetchone()
+    conn.close()
+    return row['manager_phone'] if row and row['manager_phone'] else None
+
+def find_todays_event(staff_id):
+    """Return today's confirmed event that staff is assigned to, or None."""
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT e.* FROM events e
+                 JOIN event_staffing es ON es.event_id=e.id
+                 WHERE es.staff_id=? AND es.confirmed=1 AND e.date=?
+                 LIMIT 1''', (staff_id, today))
+    event = c.fetchone()
+    conn.close()
+    return event
+
+def handle_clock(phone, body, action):
+    """
+    Process IN or OUT clock command.
+    action: 'IN' or 'OUT'
+    Returns (message, next_step) — next_step is None (stateless SMS).
+    """
+    upper = body.upper()
+
+    # Find staff by phone
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM staff WHERE phone=?', (phone,))
+    staff = c.fetchone()
+    conn.close()
+
+    if not staff:
+        return f"I don't recognize that phone number. Please contact your manager.", None
+
+    staff_id = staff['id']
+    staff_name = staff['name']
+    now = datetime.utcnow()
+    time_str = now.strftime('%I:%M %p')
+
+    if action == 'IN':
+        # Check if already clocked in today
+        today = now.strftime('%Y-%m-%d')
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''SELECT * FROM clock_entries
+                     WHERE staff_id=? AND DATE(clock_in)=DATE(?)
+                     AND clock_out IS NULL''', (staff_id, now.isoformat()))
+        existing = c.fetchone()
+        conn.close()
+        if existing:
+            return (f"You're already clocked in! "
+                    f"Clocked in at {existing['clock_in'][11:16]}. "
+                    f"Reply OUT when your shift ends."), None
+
+        # Verify on confirmed list for today's event
+        event = find_todays_event(staff_id)
+        if not event:
+            return (f"Hi {staff_name}! You're not on the confirmed staff list for today's event. "
+                    f"Please check with your Lead Coordinator before clocking in."), None
+
+        # Get optional GPS location (from SMS metadata if available)
+        location = None
+
+        # Record clock entry
+        entry_id = str(uuid.uuid4())
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''INSERT INTO clock_entries (id, staff_id, event_id, clock_in, clock_out, location, break_taken)
+                     VALUES (?, ?, ?, ?, NULL, ?, 0)''',
+                  (entry_id, staff_id, event['id'], now.isoformat(), location))
+        conn.commit()
+        conn.close()
+
+        return (f"Clocked in at {time_str}, {staff_name}! "
+                f"Event: {event['name']}. "
+                f"Have a great shift! 🎉"), None
+
+    elif action == 'OUT':
+        # Find open clock entry
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''SELECT * FROM clock_entries
+                     WHERE staff_id=? AND clock_out IS NULL
+                     ORDER BY clock_in DESC LIMIT 1''', (staff_id,))
+        entry = c.fetchone()
+        conn.close()
+
+        if not entry:
+            return (f"Hi {staff_name}! You haven't clocked in today. "
+                    f"Reply IN to start your shift."), None
+
+        # Calculate hours worked
+        clock_in_dt = datetime.fromisoformat(entry['clock_in'])
+        hours_decimal = (now - clock_in_dt).total_seconds() / 3600
+        # Round to nearest 15 min (0.25)
+        hours_rounded = round(hours_decimal * 4) / 4
+        hours_display = f"{hours_rounded:.1f}"
+
+        # Record clock-out
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('UPDATE clock_entries SET clock_out=? WHERE id=?', (now.isoformat(), entry['id']))
+        conn.commit()
+        conn.close()
+
+        # Ask compliance question about break
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('UPDATE clock_entries SET break_taken=0 WHERE id=?', (entry['id'],))
+        conn.commit()
+        conn.close()
+
+        return (f"Clocked out at {time_str}, {staff_name}. "
+                f"Total hours: {hours_display}. "
+                f"\n\nDid you take your required 30-minute break today? Reply YES or NO."), None
+
+    return "Unknown command. Reply IN or OUT.", None
+
+
+def handle_break_response(phone, body):
+    """Record break taken/not taken after clock-out."""
+    upper = body.strip().upper()
+    if upper not in ('YES', 'NO', 'Y', 'N'):
+        return "Please reply YES or NO regarding your 30-minute break.", None
+
+    break_taken = 1 if upper in ('YES', 'Y') else 0
+
+    # Look up staff_id from phone
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id FROM staff WHERE phone=?', (phone,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return "I don't recognize that phone number.", None
+    staff_id = row['id']
+
+    c.execute('''UPDATE clock_entries SET break_taken=?
+                 WHERE staff_id=? AND DATE(clock_in)=DATE(?)
+                 AND break_taken=0''', (break_taken, staff_id, datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
+
+    if break_taken:
+        return "Got it — break recorded as taken. Thank you!"
+    else:
+        return ("Got it — no break recorded. "
+                "Note: Indiana labor law requires a 30-min meal break for shifts over 6 hours. "
+                "Please consult with your manager if you believe this is incorrect."), None
+
+
+def check_long_shifts():
+    """Background check: alert manager if staff clocked in 12+ hours with no clock-out."""
+    cutoff = (datetime.utcnow() - timedelta(hours=12)).isoformat()
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT ce.*, s.name as staff_name, s.phone as staff_phone,
+                        e.name as event_name, e.date as event_date
+                 FROM clock_entries ce
+                 JOIN staff s ON ce.staff_id=s.id
+                 LEFT JOIN events e ON ce.event_id=e.id
+                 WHERE ce.clock_out IS NULL AND ce.clock_in < ?''', (cutoff,))
+    stale = c.fetchall()
+    conn.close()
+
+    manager_phone = get_manager_phone()
+    if not manager_phone or not stale:
+        return
+
+    for entry in stale:
+        msg = (f"⚠️ STAFFING ALERT\n\n"
+               f"Staff: {entry['staff_name']}\n"
+               f"Event: {entry['event_name'] or 'N/A'}\n"
+               f"Clocked in: {entry['clock_in'][:16]}\n"
+               f"12+ hours with no clock-out.\n"
+               f"Please check in with them.")
+        send_sms_alert(manager_phone, msg)
+
+
+# ─── Payroll Export ────────────────────────────────────────────────────────────
+
+@app.route('/admin/payroll_export')
+@login_required
+def payroll_export():
+    """Generate and download payroll CSV."""
+    date_from = request.args.get('from', (datetime.utcnow().replace(day=1)).strftime('%Y-%m-%d'))
+    date_to = request.args.get('to', datetime.utcnow().strftime('%Y-%m-%d'))
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT s.id as employee_id, s.name, s.role,
+                        DATE(ce.clock_in) as date,
+                        ce.clock_in, ce.clock_out, ce.break_taken,
+                        es.role as assigned_role
+                 FROM clock_entries ce
+                 JOIN staff s ON ce.staff_id=s.id
+                 LEFT JOIN event_staffing es ON es.staff_id=s.id AND DATE(es.event_id)=DATE(ce.clock_in)
+                 WHERE DATE(ce.clock_in) BETWEEN ? AND ?
+                 ORDER BY date, s.name''',
+              (date_from, date_to))
+    rows = c.fetchall()
+    conn.close()
+
+    import csv
+    import io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Employee ID', 'Name', 'Role', 'Date',
+                    'Clock In', 'Clock Out', 'Hours Worked',
+                    'Break Taken', 'Hourly Rate', 'Total Pay'])
+
+    HOURLY_RATES = {'Bartender': 18.0, 'Server': 15.0, 'Event Lead': 22.0,
+                    'Security/Parking': 16.0, 'default': 15.0}
+
+    for r in rows:
+        if not r['clock_out']:
+            continue
+        clock_in_dt = datetime.fromisoformat(r['clock_in'])
+        clock_out_dt = datetime.fromisoformat(r['clock_out'])
+        hours = round((clock_out_dt - clock_in_dt).total_seconds() / 3600, 2)
+        hours = round(hours / 0.25) * 0.25  # round to nearest 15 min
+        rate = HOURLY_RATES.get(r['assigned_role'] or r['role'] or 'default', 15.0)
+        total_pay = round(hours * rate, 2)
+        writer.writerow([
+            r['employee_id'],
+            r['name'],
+            r['assigned_role'] or r['role'],
+            r['date'],
+            r['clock_in'][11:16],
+            r['clock_out'][11:16],
+            f"{hours:.2f}",
+            'Yes' if r['break_taken'] else 'No',
+            f"${rate:.2f}",
+            f"${total_pay:.2f}",
+        ])
+
+    output.seek(0)
+    return output.getvalue(), 200, {
+        'Content-Type': 'text/csv',
+        'Content-Disposition': f'attachment; filename=payroll_{date_from}_to_{date_to}.csv'
+    }
+
+
+@app.route('/admin/timesheets')
+@login_required
+def timesheets():
+    """Admin view of all timesheet entries."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT ce.*, s.name, s.phone as staff_phone, s.role as staff_role,
+                        e.name as event_name
+                 FROM clock_entries ce
+                 JOIN staff s ON ce.staff_id=s.id
+                 LEFT JOIN events e ON ce.event_id=e.id
+                 ORDER BY ce.clock_in DESC
+                 LIMIT 100''')
+    entries = c.fetchall()
+    conn.close()
+    return render_template('admin_timesheets.html', entries=entries,
+                          admin_name=session.get('admin_name'))
+
+
+
+
+
 
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
@@ -688,6 +982,21 @@ def sms_webhook():
             answer, next_step = get_onboarding_status(from_number)
         elif upper_body == 'QUIT':
             answer, next_step = quit_onboarding(from_number)
+        elif upper_body in ('IN', 'OUT', 'YES', 'NO', 'Y', 'N'):
+            # Timesheet commands
+            if upper_body in ('YES', 'NO', 'Y', 'N'):
+                answer, next_step = handle_break_response(from_number, body), None
+            elif upper_body == 'IN':
+                answer, next_step = handle_clock(from_number, body, 'IN')
+            else:
+                answer, next_step = handle_clock(from_number, body, 'OUT')
+        elif upper_body.startswith('PAYROLL'):
+            # Payroll export link
+            link = request.host_url + 'admin/payroll_export'
+            answer = (f"Payroll Export\n\n"
+                      f"Download your payroll report here:\n{link}\n\n"
+                      f"This link covers the current month.")
+            next_step = None
         else:
             # Hand off to FAQ bot
             answer = find_best_faq_answer(body)
