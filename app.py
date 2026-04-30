@@ -128,7 +128,29 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS venue_config (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         venue_name TEXT NOT NULL DEFAULT 'Our Venue',
-        manager_phone TEXT DEFAULT ''
+        manager_phone TEXT DEFAULT '',
+        tip_pool_enabled INTEGER DEFAULT 0,
+        tipout_rate REAL DEFAULT 0.0
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS tip_entries (
+        id TEXT PRIMARY KEY,
+        staff_id TEXT NOT NULL,
+        event_id TEXT,
+        amount REAL NOT NULL,
+        tip_type TEXT NOT NULL DEFAULT 'cash',
+        recorded_at TEXT NOT NULL,
+        FOREIGN KEY (staff_id) REFERENCES staff(id),
+        FOREIGN KEY (event_id) REFERENCES events(id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS tipout_records (
+        id TEXT PRIMARY KEY,
+        event_id TEXT,
+        total_tips REAL NOT NULL,
+        tipout_rate REAL NOT NULL,
+        tipout_amount REAL NOT NULL,
+        staff_count INTEGER NOT NULL,
+        calculated_at TEXT NOT NULL,
+        FOREIGN KEY (event_id) REFERENCES events(id)
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
@@ -926,6 +948,180 @@ def timesheets():
                           admin_name=session.get('admin_name'))
 
 
+# ─── Tip Reporting & Tipout ─────────────────────────────────────────────────────
+
+def handle_tip(phone, body):
+    """Handle 'TIP [amount]' SMS command."""
+    # Parse: TIP 25.00 or TIP 25
+    m = re.match(r'^TIP\s*\$?([\d.]+)', body.strip(), re.IGNORECASE)
+    if not m:
+        return ("To log a tip, reply TIP followed by the amount.\n"
+                "Example: TIP 25.00\n"
+                "Include a decimal for cents, e.g. TIP 15.50"), None
+
+    amount = float(m.group(1))
+    if amount <= 0:
+        return "Tip amount must be greater than zero.", None
+
+    # Find staff by phone
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id, name FROM staff WHERE phone=?', (phone,))
+    staff = c.fetchone()
+    conn.close()
+    if not staff:
+        return "I don't recognize that phone number. Please contact your manager.", None
+
+    staff_id = staff['id']
+    staff_name = staff['name']
+
+    # Find today's confirmed event
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT e.id, e.name FROM events e
+                 JOIN event_staffing es ON es.event_id=e.id
+                 WHERE es.staff_id=? AND es.confirmed=1 AND e.date=?
+                 LIMIT 1''', (staff_id, today))
+    event = c.fetchone()
+    event_id = event['id'] if event else None
+    event_name = event['name'] if event else 'General'
+    conn.close()
+
+    # Check tip pool settings
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT tip_pool_enabled, tipout_rate FROM venue_config WHERE id=1')
+    cfg = c.fetchone()
+    tip_pool = cfg['tip_pool_enabled'] if cfg else 0
+    tipout_rate = cfg['tipout_rate'] if cfg else 0.0
+    conn.close()
+
+    # Record tip
+    tip_id = str(uuid.uuid4())
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''INSERT INTO tip_entries (id, staff_id, event_id, amount, tip_type, recorded_at)
+                 VALUES (?, ?, ?, ?, 'cash', ?)''',
+              (tip_id, staff_id, event_id, amount, datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
+
+    msg = (f"✅ Tip recorded: ${amount:.2f}\n"
+           f"Event: {event_name}\n"
+           f"Staff: {staff_name}")
+
+    if tip_pool and event_id:
+        # Calculate tipout
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT COUNT(*) as cnt FROM event_staffing WHERE event_id=? AND confirmed=1', (event_id,))
+        staff_count = c.fetchone()['cnt']
+        conn.close()
+
+        tipout_amount = round(amount * tipout_rate, 2)
+        per_person = round(tipout_amount / staff_count, 2) if staff_count else 0
+
+        msg += (f"\n\n💰 Tip Pool: ${amount:.2f} × {tipout_rate*100:.0f}% = ${tipout_amount:.2f} tipout\n"
+                f"→ ${per_person:.2f} per staff member ({staff_count} staff)")
+
+        # Record tipout
+        tipout_id = str(uuid.uuid4())
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''INSERT INTO tipout_records (id, event_id, total_tips, tipout_rate, tipout_amount, staff_count, calculated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                  (tipout_id, event_id, amount, tipout_rate, tipout_amount, staff_count, datetime.utcnow().isoformat()))
+        conn.commit()
+        conn.close()
+
+    return msg, None
+
+
+# ─── Venue Settings ──────────────────────────────────────────────────────────
+
+@app.route('/admin/settings', methods=['GET', 'POST'])
+@login_required
+def venue_settings():
+    """Manage venue settings including tip pool configuration."""
+    conn = get_db()
+    c = conn.cursor()
+    if request.method == 'POST':
+        venue_name = request.form.get('venue_name') or ''
+        manager_phone = request.form.get('manager_phone') or ''
+        tip_pool_enabled = 1 if request.form.get('tip_pool_enabled') else 0
+        tipout_rate = float(request.form.get('tipout_rate') or 0)
+        c.execute('UPDATE venue_config SET venue_name=?, manager_phone=?, tip_pool_enabled=?, tipout_rate=? WHERE id=1',
+                  (venue_name, manager_phone, tip_pool_enabled, tipout_rate))
+        conn.commit()
+        flash('Settings saved.', 'success')
+    c.execute('SELECT * FROM venue_config WHERE id=1')
+    settings = c.fetchone()
+    conn.close()
+    return render_template('admin_settings.html', settings=settings,
+                          admin_name=session.get('admin_name'))
+
+
+# ─── Tip Admin Routes ──────────────────────────────────────────────────────────
+
+@app.route('/admin/tips')
+@login_required
+def admin_tips():
+    """Admin tip overview."""
+    date_from = request.args.get('from', '')
+    date_to = request.args.get('to', '')
+
+    conn = get_db()
+    c = conn.cursor()
+    query = '''SELECT t.*, s.name as staff_name, e.name as event_name
+               FROM tip_entries t
+               JOIN staff s ON t.staff_id=s.id
+               LEFT JOIN events e ON t.event_id=e.id'''
+    params = []
+    if date_from and date_to:
+        query += ' WHERE DATE(t.recorded_at) BETWEEN ? AND ?'
+        params = [date_from, date_to]
+    query += ' ORDER BY t.recorded_at DESC LIMIT 200'
+    c.execute(query, params)
+    tips = c.fetchall()
+
+    # Totals
+    c.execute('SELECT SUM(amount) as total FROM tip_entries')
+    total_tips = c.fetchone()['total'] or 0
+    conn.close()
+
+    return render_template('admin_tips.html', tips=tips, total_tips=total_tips,
+                          date_from=date_from, date_to=date_to,
+                          admin_name=session.get('admin_name'))
+
+
+@app.route('/admin/tips/export')
+@login_required
+def tips_export():
+    """Download tips as CSV."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT s.name, s.id as employee_id, e.name as event_name,
+                        t.amount, t.tip_type, t.recorded_at
+                 FROM tip_entries t
+                 JOIN staff s ON t.staff_id=s.id
+                 LEFT JOIN events e ON t.event_id=e.id
+                 ORDER BY t.recorded_at DESC''')
+    rows = c.fetchall()
+    conn.close()
+
+    import io, csv
+    output = io.StringIO()
+    w = csv.writer(output)
+    w.writerow(['Employee ID', 'Name', 'Event', 'Amount', 'Type', 'Date'])
+    for r in rows:
+        w.writerow([r['employee_id'], r['staff_name'], r['event_name'] or '',
+                   f"${r['amount']:.2f}", r['tip_type'], r['recorded_at'][:10]])
+    output.seek(0)
+    return output.getvalue(), 200, {
+        'Content-Type': 'text/csv',
+        'Content-Disposition': 'attachment; filename=tips.csv'
+    }
 
 
 
@@ -997,6 +1193,9 @@ def sms_webhook():
                       f"Download your payroll report here:\n{link}\n\n"
                       f"This link covers the current month.")
             next_step = None
+        elif upper_body.startswith('TIP'):
+            # Tip logging
+            answer, next_step = handle_tip(from_number, body)
         else:
             # Hand off to FAQ bot
             answer = find_best_faq_answer(body)

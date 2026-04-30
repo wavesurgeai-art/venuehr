@@ -25,6 +25,8 @@
                     <a href="{{ url_for('admin_faqs') }}" class="hover:text-gray-900 {% if request.endpoint and 'faq' in request.endpoint %}text-gray-900 font-medium{% endif %}">FAQs</a>
                     <a href="{{ url_for('staffing_matrix') }}" class="hover:text-gray-900 {% if request.endpoint and 'staffing' in request.endpoint %}text-gray-900 font-medium{% endif %}">Staffing</a>
                     <a href="{{ url_for('timesheets') }}" class="hover:text-gray-900 {% if request.endpoint and 'timesheet' in request.endpoint %}text-gray-900 font-medium{% endif %}">Timesheets</a>
+                    <a href="{{ url_for('admin_tips') }}" class="hover:text-gray-900 {% if request.endpoint and 'tips' in request.endpoint %}text-gray-900 font-medium{% endif %}">Tips</a>
+                    <a href="{{ url_for('venue_settings') }}" class="hover:text-gray-900 {% if request.endpoint == 'venue_settings' %}text-gray-900 font-medium{% endif %}">Settings</a>
                 </div>
             </div>
             <div class="flex items-center gap-4">

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Tips — VenueHR{% endblock %}
+
+{% block content %}
+<div class="mb-8 flex items-center justify-between">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Tip Reporting</h1>
+        <p class="text-gray-500">Logged tips and tipout calculations</p>
+    </div>
+    <div class="flex gap-3">
+        <a href="{{ url_for('tips_export') }}" class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">
+            ⬇ Export CSV
+        </a>
+    </div>
+</div>
+
+<!-- Summary Cards -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        <div class="text-sm text-gray-500 mb-1">Total Tips Logged</div>
+        <div class="text-3xl font-bold text-emerald-600">${{ "%.2f"|format(total_tips) }}</div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        <div class="text-sm text-gray-500 mb-1">Total Entries</div>
+        <div class="text-3xl font-bold text-gray-900">{{ tips|length }}</div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        <div class="text-sm text-gray-500 mb-1">Tip Pool</div>
+        <div class="text-3xl font-bold text-gray-900">
+            <span class="text-emerald-600">Active</span>
+        </div>
+    </div>
+</div>
+
+<!-- Tips Table -->
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    {% if tips %}
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left text-gray-500 border-b bg-gray-50">
+                <th class="p-4 font-medium">Staff</th>
+                <th class="p-4 font-medium">Event</th>
+                <th class="p-4 font-medium">Amount</th>
+                <th class="p-4 font-medium">Type</th>
+                <th class="p-4 font-medium">Date</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for t in tips %}
+            <tr>
+                <td class="p-4 font-medium text-gray-900">{{ t.staff_name }}</td>
+                <td class="p-4 text-gray-700">{{ t.event_name or 'General' }}</td>
+                <td class="p-4 font-bold text-emerald-700">${{ "%.2f"|format(t.amount) }}</td>
+                <td class="p-4 text-gray-700 capitalize">{{ t.tip_type }}</td>
+                <td class="p-4 text-gray-500">{{ t.recorded_at[:16] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="p-12 text-center text-gray-400">
+        No tips logged yet. Staff can text "TIP 25.00" to log a tip.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
