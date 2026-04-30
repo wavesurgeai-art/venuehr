@@ -431,46 +431,49 @@ TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')  # Set in Render
 @app.route('/sms/webhook', methods=['GET', 'POST'])
 def sms_webhook():
     """Twilio SMS webhook — receives texts and auto-replies with FAQ answers."""
-    if request.method == 'GET':
-        # Twilio validation request
-        return '', 200
+    try:
+        if request.method == 'GET':
+            return '', 200
 
-    from twilio.rest import Client
-    from twilio.request_validator import RequestValidator
+        from twilio.rest import Client
+        from twilio.request_validator import RequestValidator
 
-    # Validate Twilio signature (skip for local/Render testing if DISABLE_TWILIO_VALIDATION=1)
-    skip_validation = os.environ.get('DISABLE_TWILIO_VALIDATION', '').lower() == '1'
-    if not skip_validation and TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
-        validator = RequestValidator(TWILIO_AUTH_TOKEN)
-        signature = request.headers.get('X-Twilio-Signature', '')
-        url = request.url
-        if not validator.validate(url, request.form, signature):
-            return 'Forbidden', 403
+        # Validate Twilio signature (skip if DISABLE_TWILIO_VALIDATION=1)
+        skip_validation = os.environ.get('DISABLE_TWILIO_VALIDATION', '').lower() == '1'
+        if not skip_validation and TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+            validator = RequestValidator(TWILIO_AUTH_TOKEN)
+            signature = request.headers.get('X-Twilio-Signature', '')
+            url = request.url
+            if not validator.validate(url, request.form, signature):
+                return 'Forbidden', 403
 
-    # Parse incoming SMS
-    from_number = request.form.get('From', '')
-    body = request.form.get('Body', '').strip().lower()
+        # Parse incoming SMS
+        from_number = request.form.get('From', '')
+        body = request.form.get('Body', '').strip().lower()
 
-    # Find best FAQ match
-    answer = find_best_faq_answer(body)
+        # Find best FAQ match
+        answer = find_best_faq_answer(body)
 
-    # Send auto-reply via Twilio
-    if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER:
-        try:
-            client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-            client.messages.create(
-                body=answer,
-                from_=TWILIO_PHONE_NUMBER,
-                to=from_number
-            )
-        except Exception as e:
-            app.logger.error(f'Twilio error: {e}')
+        # Send auto-reply via Twilio
+        if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER:
+            try:
+                client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+                client.messages.create(
+                    body=answer,
+                    from_=TWILIO_PHONE_NUMBER,
+                    to=from_number
+                )
+            except Exception as e:
+                app.logger.error(f'Twilio send error: {e}')
 
-    # Respond with TwiML
-    from twilio.twiml import MessagingResponse
-    resp = MessagingResponse()
-    resp.message(answer)
-    return str(resp), 200, {'Content-Type': 'text/xml'}
+        # Respond with TwiML
+        from twilio.twiml import MessagingResponse
+        resp = MessagingResponse()
+        resp.message(answer)
+        return str(resp), 200, {'Content-Type': 'text/xml'}
+    except Exception as e:
+        app.logger.error(f'SMS webhook error: {e}')
+        return f'SMS error: {e}', 500
 
 def find_best_faq_answer(query: str) -> str:
     """Search FAQ database for best matching answer."""
