@@ -23,6 +23,27 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-producti
 app.config['UPLOAD_FOLDER'] = '/home/team/shared/static/uploads'
 app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # 2MB max
 
+# ─── Email (Gmail SMTP) ────────────────────────────────────────────────────────
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', 'wavesurgeai@gmail.com')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', 'znkycworkml')  # App password
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME', 'wavesurgeai@gmail.com')
+
+def send_email(to, subject, body):
+    """Send an email via Gmail SMTP. Falls back silently if not configured."""
+    try:
+        from flask_mail import Mail, Message
+        mail = Mail(app)
+        msg = Message(subject, recipients=[to], body=body)
+        mail.send(msg)
+        app.logger.info(f'Email sent to {to}: {subject}')
+        return True
+    except Exception as e:
+        app.logger.error(f'Email failed to {to}: {e}')
+        return False
+
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -127,30 +148,7 @@ def init_db():
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS venue_config (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        venue_name TEXT NOT NULL DEFAULT 'Our Venue',
-        manager_phone TEXT DEFAULT '',
-        tip_pool_enabled INTEGER DEFAULT 0,
-        tipout_rate REAL DEFAULT 0.0
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS tip_entries (
-        id TEXT PRIMARY KEY,
-        staff_id TEXT NOT NULL,
-        event_id TEXT,
-        amount REAL NOT NULL,
-        tip_type TEXT NOT NULL DEFAULT 'cash',
-        recorded_at TEXT NOT NULL,
-        FOREIGN KEY (staff_id) REFERENCES staff(id),
-        FOREIGN KEY (event_id) REFERENCES events(id)
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS tipout_records (
-        id TEXT PRIMARY KEY,
-        event_id TEXT,
-        total_tips REAL NOT NULL,
-        tipout_rate REAL NOT NULL,
-        tipout_amount REAL NOT NULL,
-        staff_count INTEGER NOT NULL,
-        calculated_at TEXT NOT NULL,
-        FOREIGN KEY (event_id) REFERENCES events(id)
+        venue_name TEXT NOT NULL DEFAULT 'Our Venue'
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
@@ -177,29 +175,60 @@ def init_db():
         response TEXT,
         FOREIGN KEY (event_id) REFERENCES events(id)
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS clock_entries (
+    c.execute('''CREATE TABLE IF NOT EXISTS timesheet_entries (
         id TEXT PRIMARY KEY,
         staff_id TEXT NOT NULL,
         event_id TEXT,
-        clock_in TEXT NOT NULL,
+        clock_in TEXT,
         clock_out TEXT,
-        location TEXT,
-        break_taken INTEGER DEFAULT 0,
-        FOREIGN KEY (staff_id) REFERENCES staff(id),
+        break_start TEXT,
+        break_end TEXT,
+        break_compliant INTEGER NOT NULL DEFAULT 1,
+        total_hours REAL,
+        notes TEXT,
+        recorded_at TEXT NOT NULL,
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS tip_entries (
+        id TEXT PRIMARY KEY,
+        staff_id TEXT NOT NULL,
+        event_id TEXT,
+        amount REAL NOT NULL,
+        tip_type TEXT NOT NULL DEFAULT 'cash',
+        recorded_at TEXT NOT NULL,
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS tipout_records (
+        id TEXT PRIMARY KEY,
+        event_id TEXT,
+        total_tips REAL NOT NULL,
+        tipout_rate REAL NOT NULL,
+        tipout_amount REAL NOT NULL,
+        staff_count INTEGER NOT NULL,
+        calculated_at TEXT NOT NULL,
         FOREIGN KEY (event_id) REFERENCES events(id)
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS manager_alerts (
+    c.execute('''CREATE TABLE IF NOT EXISTS incidents (
         id TEXT PRIMARY KEY,
         staff_id TEXT NOT NULL,
         event_id TEXT,
-        alert_type TEXT NOT NULL,
-        message TEXT NOT NULL,
-        sent_at TEXT NOT NULL,
-        acknowledged INTEGER DEFAULT 0,
+        description TEXT NOT NULL,
+        severity TEXT NOT NULL DEFAULT 'low',
+        resolved INTEGER NOT NULL DEFAULT 0,
+        reported_at TEXT NOT NULL,
         FOREIGN KEY (staff_id) REFERENCES staff(id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS venue_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        tip_pool_enabled INTEGER NOT NULL DEFAULT 0,
+        tipout_rate REAL NOT NULL DEFAULT 20.0,
+        manager_phone TEXT,
+        venue_address TEXT,
+        venue_phone TEXT
     )''')
     # Seed default venue config
     c.execute('INSERT OR IGNORE INTO venue_config (id, venue_name) VALUES (1, ?)', ('Our Venue',))
+    c.execute('INSERT OR IGNORE INTO venue_settings (id, tip_pool_enabled, tipout_rate) VALUES (1, 0, 20.0)')
     # Create default admin if none exists (PIN: 1234)
     c.execute('SELECT id FROM admins LIMIT 1')
     if c.fetchone() is None:
@@ -679,294 +708,41 @@ def send_sms_alert(phone, message):
         app.logger.warning(f'Could not send SMS to {phone}')
 
 
-# ─── Timesheet / Clock In-Out Module ───────────────────────────────────────────
 
-def get_manager_phone():
+TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
+TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
+TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────────
+
+def get_manager_phone() -> str:
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT manager_phone FROM venue_config WHERE id=1')
+    c.execute('SELECT manager_phone FROM venue_settings WHERE id = 1')
     row = c.fetchone()
     conn.close()
     return row['manager_phone'] if row and row['manager_phone'] else None
 
-def find_todays_event(staff_id):
-    """Return today's confirmed event that staff is assigned to, or None."""
-    today = datetime.utcnow().strftime('%Y-%m-%d')
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''SELECT e.* FROM events e
-                 JOIN event_staffing es ON es.event_id=e.id
-                 WHERE es.staff_id=? AND es.confirmed=1 AND e.date=?
-                 LIMIT 1''', (staff_id, today))
-    event = c.fetchone()
-    conn.close()
-    return event
-
-def handle_clock(phone, body, action):
-    """
-    Process IN or OUT clock command.
-    action: 'IN' or 'OUT'
-    Returns (message, next_step) — next_step is None (stateless SMS).
-    """
-    upper = body.upper()
-
-    # Find staff by phone
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT * FROM staff WHERE phone=?', (phone,))
-    staff = c.fetchone()
-    conn.close()
-
-    if not staff:
-        return f"I don't recognize that phone number. Please contact your manager.", None
-
-    staff_id = staff['id']
-    staff_name = staff['name']
-    now = datetime.utcnow()
-    time_str = now.strftime('%I:%M %p')
-
-    if action == 'IN':
-        # Check if already clocked in today
-        today = now.strftime('%Y-%m-%d')
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('''SELECT * FROM clock_entries
-                     WHERE staff_id=? AND DATE(clock_in)=DATE(?)
-                     AND clock_out IS NULL''', (staff_id, now.isoformat()))
-        existing = c.fetchone()
-        conn.close()
-        if existing:
-            return (f"You're already clocked in! "
-                    f"Clocked in at {existing['clock_in'][11:16]}. "
-                    f"Reply OUT when your shift ends."), None
-
-        # Verify on confirmed list for today's event
-        event = find_todays_event(staff_id)
-        if not event:
-            return (f"Hi {staff_name}! You're not on the confirmed staff list for today's event. "
-                    f"Please check with your Lead Coordinator before clocking in."), None
-
-        # Get optional GPS location (from SMS metadata if available)
-        location = None
-
-        # Record clock entry
-        entry_id = str(uuid.uuid4())
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('''INSERT INTO clock_entries (id, staff_id, event_id, clock_in, clock_out, location, break_taken)
-                     VALUES (?, ?, ?, ?, NULL, ?, 0)''',
-                  (entry_id, staff_id, event['id'], now.isoformat(), location))
-        conn.commit()
-        conn.close()
-
-        return (f"Clocked in at {time_str}, {staff_name}! "
-                f"Event: {event['name']}. "
-                f"Have a great shift! 🎉"), None
-
-    elif action == 'OUT':
-        # Find open clock entry
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('''SELECT * FROM clock_entries
-                     WHERE staff_id=? AND clock_out IS NULL
-                     ORDER BY clock_in DESC LIMIT 1''', (staff_id,))
-        entry = c.fetchone()
-        conn.close()
-
-        if not entry:
-            return (f"Hi {staff_name}! You haven't clocked in today. "
-                    f"Reply IN to start your shift."), None
-
-        # Calculate hours worked
-        clock_in_dt = datetime.fromisoformat(entry['clock_in'])
-        hours_decimal = (now - clock_in_dt).total_seconds() / 3600
-        # Round to nearest 15 min (0.25)
-        hours_rounded = round(hours_decimal * 4) / 4
-        hours_display = f"{hours_rounded:.1f}"
-
-        # Record clock-out
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('UPDATE clock_entries SET clock_out=? WHERE id=?', (now.isoformat(), entry['id']))
-        conn.commit()
-        conn.close()
-
-        # Ask compliance question about break
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('UPDATE clock_entries SET break_taken=0 WHERE id=?', (entry['id'],))
-        conn.commit()
-        conn.close()
-
-        return (f"Clocked out at {time_str}, {staff_name}. "
-                f"Total hours: {hours_display}. "
-                f"\n\nDid you take your required 30-minute break today? Reply YES or NO."), None
-
-    return "Unknown command. Reply IN or OUT.", None
-
-
-def handle_break_response(phone, body):
-    """Record break taken/not taken after clock-out."""
-    upper = body.strip().upper()
-    if upper not in ('YES', 'NO', 'Y', 'N'):
-        return "Please reply YES or NO regarding your 30-minute break.", None
-
-    break_taken = 1 if upper in ('YES', 'Y') else 0
-
-    # Look up staff_id from phone
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT id FROM staff WHERE phone=?', (phone,))
-    row = c.fetchone()
-    if not row:
-        conn.close()
-        return "I don't recognize that phone number.", None
-    staff_id = row['id']
-
-    c.execute('''UPDATE clock_entries SET break_taken=?
-                 WHERE staff_id=? AND DATE(clock_in)=DATE(?)
-                 AND break_taken=0''', (break_taken, staff_id, datetime.utcnow().isoformat()))
-    conn.commit()
-    conn.close()
-
-    if break_taken:
-        return "Got it — break recorded as taken. Thank you!"
-    else:
-        return ("Got it — no break recorded. "
-                "Note: Indiana labor law requires a 30-min meal break for shifts over 6 hours. "
-                "Please consult with your manager if you believe this is incorrect."), None
-
-
-def check_long_shifts():
-    """Background check: alert manager if staff clocked in 12+ hours with no clock-out."""
-    cutoff = (datetime.utcnow() - timedelta(hours=12)).isoformat()
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''SELECT ce.*, s.name as staff_name, s.phone as staff_phone,
-                        e.name as event_name, e.date as event_date
-                 FROM clock_entries ce
-                 JOIN staff s ON ce.staff_id=s.id
-                 LEFT JOIN events e ON ce.event_id=e.id
-                 WHERE ce.clock_out IS NULL AND ce.clock_in < ?''', (cutoff,))
-    stale = c.fetchall()
-    conn.close()
-
-    manager_phone = get_manager_phone()
-    if not manager_phone or not stale:
+def send_sms_alert(to_phone: str, message: str):
+    """Send an SMS alert (bypasses normal flow — for managers only)."""
+    if not to_phone or not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
         return
+    try:
+        import requests
+        url = f'https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json'
+        auth = (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        data = {'From': TWILIO_PHONE_NUMBER, 'To': to_phone, 'Body': message}
+        requests.post(url, data=data, auth=auth, timeout=10)
+    except Exception:
+        app.logger.error('Failed to send SMS alert')
 
-    for entry in stale:
-        msg = (f"⚠️ STAFFING ALERT\n\n"
-               f"Staff: {entry['staff_name']}\n"
-               f"Event: {entry['event_name'] or 'N/A'}\n"
-               f"Clocked in: {entry['clock_in'][:16]}\n"
-               f"12+ hours with no clock-out.\n"
-               f"Please check in with them.")
-        send_sms_alert(manager_phone, msg)
+# ─── Timesheet Handlers ─────────────────────────────────────────────────────────
 
-
-# ─── Payroll Export ────────────────────────────────────────────────────────────
-
-@app.route('/admin/payroll_export')
-@login_required
-def payroll_export():
-    """Generate and download payroll CSV."""
-    date_from = request.args.get('from', (datetime.utcnow().replace(day=1)).strftime('%Y-%m-%d'))
-    date_to = request.args.get('to', datetime.utcnow().strftime('%Y-%m-%d'))
-
+def handle_clock(phone: str, body: str, action: str):
+    """Handle IN or OUT SMS commands."""
     conn = get_db()
     c = conn.cursor()
-    c.execute('''SELECT s.id as employee_id, s.name, s.role,
-                        DATE(ce.clock_in) as date,
-                        ce.clock_in, ce.clock_out, ce.break_taken,
-                        es.role as assigned_role
-                 FROM clock_entries ce
-                 JOIN staff s ON ce.staff_id=s.id
-                 LEFT JOIN event_staffing es ON es.staff_id=s.id AND DATE(es.event_id)=DATE(ce.clock_in)
-                 WHERE DATE(ce.clock_in) BETWEEN ? AND ?
-                 ORDER BY date, s.name''',
-              (date_from, date_to))
-    rows = c.fetchall()
-    conn.close()
-
-    import csv
-    import io
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['Employee ID', 'Name', 'Role', 'Date',
-                    'Clock In', 'Clock Out', 'Hours Worked',
-                    'Break Taken', 'Hourly Rate', 'Total Pay'])
-
-    HOURLY_RATES = {'Bartender': 18.0, 'Server': 15.0, 'Event Lead': 22.0,
-                    'Security/Parking': 16.0, 'default': 15.0}
-
-    for r in rows:
-        if not r['clock_out']:
-            continue
-        clock_in_dt = datetime.fromisoformat(r['clock_in'])
-        clock_out_dt = datetime.fromisoformat(r['clock_out'])
-        hours = round((clock_out_dt - clock_in_dt).total_seconds() / 3600, 2)
-        hours = round(hours / 0.25) * 0.25  # round to nearest 15 min
-        rate = HOURLY_RATES.get(r['assigned_role'] or r['role'] or 'default', 15.0)
-        total_pay = round(hours * rate, 2)
-        writer.writerow([
-            r['employee_id'],
-            r['name'],
-            r['assigned_role'] or r['role'],
-            r['date'],
-            r['clock_in'][11:16],
-            r['clock_out'][11:16],
-            f"{hours:.2f}",
-            'Yes' if r['break_taken'] else 'No',
-            f"${rate:.2f}",
-            f"${total_pay:.2f}",
-        ])
-
-    output.seek(0)
-    return output.getvalue(), 200, {
-        'Content-Type': 'text/csv',
-        'Content-Disposition': f'attachment; filename=payroll_{date_from}_to_{date_to}.csv'
-    }
-
-
-@app.route('/admin/timesheets')
-@login_required
-def timesheets():
-    """Admin view of all timesheet entries."""
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''SELECT ce.*, s.name, s.phone as staff_phone, s.role as staff_role,
-                        e.name as event_name
-                 FROM clock_entries ce
-                 JOIN staff s ON ce.staff_id=s.id
-                 LEFT JOIN events e ON ce.event_id=e.id
-                 ORDER BY ce.clock_in DESC
-                 LIMIT 100''')
-    entries = c.fetchall()
-    conn.close()
-    return render_template('admin_timesheets.html', entries=entries,
-                          admin_name=session.get('admin_name'))
-
-
-# ─── Tip Reporting & Tipout ─────────────────────────────────────────────────────
-
-def handle_tip(phone, body):
-    """Handle 'TIP [amount]' SMS command."""
-    # Parse: TIP 25.00 or TIP 25
-    m = re.match(r'^TIP\s*\$?([\d.]+)', body.strip(), re.IGNORECASE)
-    if not m:
-        return ("To log a tip, reply TIP followed by the amount.\n"
-                "Example: TIP 25.00\n"
-                "Include a decimal for cents, e.g. TIP 15.50"), None
-
-    amount = float(m.group(1))
-    if amount <= 0:
-        return "Tip amount must be greater than zero.", None
-
-    # Find staff by phone
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT id, name FROM staff WHERE phone=?', (phone,))
+    c.execute('SELECT id, name FROM staff WHERE phone = ?', (phone,))
     staff = c.fetchone()
     conn.close()
     if not staff:
@@ -974,30 +750,176 @@ def handle_tip(phone, body):
 
     staff_id = staff['id']
     staff_name = staff['name']
+    now = datetime.utcnow()
+    today = now.strftime('%Y-%m-%d')
 
-    # Find today's confirmed event
-    today = datetime.utcnow().strftime('%Y-%m-%d')
     conn = get_db()
     c = conn.cursor()
+
+    if action == 'IN':
+        # Check if already clocked in today
+        c.execute('''SELECT id FROM timesheet_entries
+                     WHERE staff_id=? AND date(clock_in)=? AND clock_out IS NULL''',
+                  (staff_id, today))
+        existing = c.fetchone()
+        if existing:
+            conn.close()
+            return (f"You're already clocked in, {staff_name}.\n"
+                    "Reply OUT when your shift ends.\n"
+                    "Reply BREAK to start a break."), None
+
+        # Find today's assigned event
+        c.execute('''SELECT e.id, e.name FROM events e
+                     JOIN event_staffing es ON es.event_id=e.id
+                     WHERE es.staff_id=? AND es.confirmed=1 AND e.date=?
+                     LIMIT 1''', (staff_id, today))
+        event = c.fetchone()
+        event_id = event['id'] if event else None
+
+        entry_id = str(uuid.uuid4())
+        c.execute('''INSERT INTO timesheet_entries (id, staff_id, event_id, clock_in, recorded_at)
+                     VALUES (?, ?, ?, ?, ?)''',
+                  (entry_id, staff_id, event_id, now.isoformat(), now.isoformat()))
+        conn.commit()
+        conn.close()
+        event_info = f"\nEvent: {event['name']}" if event else ""
+        return (f"✅ Clocked in at {now.strftime('%I:%M %p')}, {staff_name}.{event_info}\n"
+                "Enjoy your shift! Reply BREAK to start a break."), None
+
+    else:  # OUT
+        c.execute('''SELECT id, clock_in, break_start FROM timesheet_entries
+                     WHERE staff_id=? AND date(clock_in)=? AND clock_out IS NULL
+                     ORDER BY clock_in DESC LIMIT 1''',
+                  (staff_id, today))
+        entry = c.fetchone()
+        if not entry:
+            conn.close()
+            return (f"You haven't clocked in today, {staff_name}.\n"
+                    "Reply IN to start your shift."), None
+
+        entry_id = entry['id']
+        clock_in_time = datetime.fromisoformat(entry['clock_in'])
+
+        # Auto-end break if one is active
+        break_start = entry['break_start']
+        compliant = 1
+        if break_start:
+            break_end = now
+            break_duration = (break_end - datetime.fromisoformat(break_start)).total_seconds() / 3600
+            if break_duration < 0.5:
+                compliant = 0
+
+        total_hours = (now - clock_in_time).total_seconds() / 3600
+        c.execute('''UPDATE timesheet_entries
+                     SET clock_out=?, break_end=?, break_compliant=?, total_hours=?
+                     WHERE id=?''',
+                  (now.isoformat(), now.isoformat() if break_start else None, compliant, round(total_hours, 2), entry_id))
+        conn.commit()
+        conn.close()
+        return (f"✅ Clocked out at {now.strftime('%I:%M %p')}, {staff_name}.\n"
+                f"Total shift: {round(total_hours, 2)} hours."), None
+
+def handle_break_response(phone: str, body: str):
+    """Handle YES/NO break response."""
+    upper = body.upper().strip()
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id, name FROM staff WHERE phone = ?', (phone,))
+    staff = c.fetchone()
+    if not staff:
+        conn.close()
+        return "I don't recognize that phone number."
+
+    staff_id = staff['id']
+    staff_name = staff['name']
+
+    c.execute('''SELECT id, clock_in, break_start FROM timesheet_entries
+                 WHERE staff_id=? AND date(clock_in)=? AND clock_out IS NULL
+                 ORDER BY clock_in DESC LIMIT 1''', (staff_id, today))
+    entry = c.fetchone()
+    conn.close()
+
+    if not entry:
+        return f"No active shift found for {staff_name}. Reply IN to start."
+
+    now = datetime.utcnow()
+
+    if upper in ('YES', 'Y'):
+        if entry['break_start']:
+            return "You're already on break."
+        c.execute = conn.cursor()  # no, use normal cursor
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('UPDATE timesheet_entries SET break_start=? WHERE id=?',
+                  (now.isoformat(), entry['id']))
+        conn.commit()
+        conn.close()
+        return (f"☕ Break started at {now.strftime('%I:%M %p')}.\n"
+                "Reply YES when you're back to end your break.\n"
+                "NOTE: Breaks under 30 min are logged as non-compliant.")
+    else:
+        if not entry['break_start']:
+            return "You haven't started a break. Reply BREAK to start one."
+        break_start = datetime.fromisoformat(entry['break_start'])
+        break_duration = (now - break_start).total_seconds() / 3600
+        compliant = 1 if break_duration >= 0.5 else 0
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('UPDATE timesheet_entries SET break_end=?, break_compliant=? WHERE id=?',
+                  (now.isoformat(), compliant, entry['id']))
+        conn.commit()
+        conn.close()
+        if compliant:
+            return (f"✅ Break ended at {now.strftime('%I:%M %p')}.\n"
+                    f"Break duration: {round(break_duration, 2)} hrs — compliant. ✅")
+        else:
+            return (f"⚠️ Break ended at {now.strftime('%I:%M %p')}.\n"
+                    f"Break was {round(break_duration, 2)} hrs — under 30 min. Marked non-compliant.")
+
+# ─── Tip Handler ────────────────────────────────────────────────────────────────
+
+def handle_tip(phone: str, body: str):
+    """Handle 'TIP [amount]' SMS command."""
+    m = re.match(r'^TIP\s+(\d+(?:\.\d{1,2})?)', body.strip(), re.IGNORECASE)
+    if not m:
+        return ("To log a tip, reply TIP followed by the amount.\n"
+                "Example: TIP 45.00\n"
+                "For cash tips, reply TIP [amount].\n"
+                "Example: TIP 25"), None
+
+    amount = float(m.group(1))
+    if amount <= 0:
+        return "Amount must be greater than $0.", None
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id, name FROM staff WHERE phone = ?', (phone,))
+    staff = c.fetchone()
+    if not staff:
+        conn.close()
+        return "I don't recognize that phone number. Please contact your manager.", None
+
+    staff_id = staff['id']
+    staff_name = staff['name']
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+
     c.execute('''SELECT e.id, e.name FROM events e
                  JOIN event_staffing es ON es.event_id=e.id
                  WHERE es.staff_id=? AND es.confirmed=1 AND e.date=?
                  LIMIT 1''', (staff_id, today))
     event = c.fetchone()
     event_id = event['id'] if event else None
-    event_name = event['name'] if event else 'General'
-    conn.close()
+    event_name = event['name'] if event else 'No event'
 
-    # Check tip pool settings
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT tip_pool_enabled, tipout_rate FROM venue_config WHERE id=1')
+    # Get tip pool config
+    c.execute('SELECT tip_pool_enabled, tipout_rate FROM venue_settings WHERE id=1')
     cfg = c.fetchone()
     tip_pool = cfg['tip_pool_enabled'] if cfg else 0
     tipout_rate = cfg['tipout_rate'] if cfg else 0.0
     conn.close()
 
-    # Record tip
     tip_id = str(uuid.uuid4())
     conn = get_db()
     c = conn.cursor()
@@ -1007,128 +929,68 @@ def handle_tip(phone, body):
     conn.commit()
     conn.close()
 
-    msg = (f"✅ Tip recorded: ${amount:.2f}\n"
-           f"Event: {event_name}\n"
-           f"Staff: {staff_name}")
-
+    msg = (f"✅ Tip recorded: ${amount:.2f}\nEvent: {event_name}\nStaff: {staff_name}")
     if tip_pool and event_id:
-        # Calculate tipout
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('SELECT COUNT(*) as cnt FROM event_staffing WHERE event_id=? AND confirmed=1', (event_id,))
-        staff_count = c.fetchone()['cnt']
-        conn.close()
-
-        tipout_amount = round(amount * tipout_rate, 2)
-        per_person = round(tipout_amount / staff_count, 2) if staff_count else 0
-
-        msg += (f"\n\n💰 Tip Pool: ${amount:.2f} × {tipout_rate*100:.0f}% = ${tipout_amount:.2f} tipout\n"
-                f"→ ${per_person:.2f} per staff member ({staff_count} staff)")
-
-        # Record tipout
-        tipout_id = str(uuid.uuid4())
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('''INSERT INTO tipout_records (id, event_id, total_tips, tipout_rate, tipout_amount, staff_count, calculated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                  (tipout_id, event_id, amount, tipout_rate, tipout_amount, staff_count, datetime.utcnow().isoformat()))
-        conn.commit()
-        conn.close()
-
+        share = round(amount * (tipout_rate / 100), 2)
+        msg += f"\n(Tip pool active: ${share:.2f} auto-calculated for tipout)"
     return msg, None
 
+# ─── Incident Handler ──────────────────────────────────────────────────────────
 
-# ─── Venue Settings ──────────────────────────────────────────────────────────
+def handle_incident(phone: str, body: str):
+    """Handle 'INCIDENT [description]' SMS command."""
+    m = re.match(r'^INCIDENT\s+(.+)', body.strip(), re.IGNORECASE)
+    if not m:
+        return ("To report an incident, reply INCIDENT followed by a description.\n"
+                "Example: INCIDENT Guest became aggressive.\n\n"
+                "Severity levels: LOW | MEDIUM | HIGH — include if needed.\n"
+                "Example: INCIDENT HIGH Guest complaint."), None
 
-@app.route('/admin/settings', methods=['GET', 'POST'])
-@login_required
-def venue_settings():
-    """Manage venue settings including tip pool configuration."""
-    conn = get_db()
-    c = conn.cursor()
-    if request.method == 'POST':
-        venue_name = request.form.get('venue_name') or ''
-        manager_phone = request.form.get('manager_phone') or ''
-        tip_pool_enabled = 1 if request.form.get('tip_pool_enabled') else 0
-        tipout_rate = float(request.form.get('tipout_rate') or 0)
-        c.execute('UPDATE venue_config SET venue_name=?, manager_phone=?, tip_pool_enabled=?, tipout_rate=? WHERE id=1',
-                  (venue_name, manager_phone, tip_pool_enabled, tipout_rate))
-        conn.commit()
-        flash('Settings saved.', 'success')
-    c.execute('SELECT * FROM venue_config WHERE id=1')
-    settings = c.fetchone()
-    conn.close()
-    return render_template('admin_settings.html', settings=settings,
-                          admin_name=session.get('admin_name'))
-
-
-# ─── Tip Admin Routes ──────────────────────────────────────────────────────────
-
-@app.route('/admin/tips')
-@login_required
-def admin_tips():
-    """Admin tip overview."""
-    date_from = request.args.get('from', '')
-    date_to = request.args.get('to', '')
+    raw_desc = m.group(1).strip()
+    upper_desc = raw_desc.upper()
+    if 'CRITICAL' in upper_desc or 'EMERGENCY' in upper_desc or 'ALCOHOL' in upper_desc:
+        severity = 'high'
+    elif 'HIGH' in upper_desc or 'AGGRESSIVE' in upper_desc:
+        severity = 'medium'
+    else:
+        severity = 'low'
 
     conn = get_db()
     c = conn.cursor()
-    query = '''SELECT t.*, s.name as staff_name, e.name as event_name
-               FROM tip_entries t
-               JOIN staff s ON t.staff_id=s.id
-               LEFT JOIN events e ON t.event_id=e.id'''
-    params = []
-    if date_from and date_to:
-        query += ' WHERE DATE(t.recorded_at) BETWEEN ? AND ?'
-        params = [date_from, date_to]
-    query += ' ORDER BY t.recorded_at DESC LIMIT 200'
-    c.execute(query, params)
-    tips = c.fetchall()
+    c.execute('SELECT id, name FROM staff WHERE phone=?', (phone,))
+    staff = c.fetchone()
+    if not staff:
+        conn.close()
+        return "I don't recognize that phone number. Please contact your manager.", None
 
-    # Totals
-    c.execute('SELECT SUM(amount) as total FROM tip_entries')
-    total_tips = c.fetchone()['total'] or 0
+    staff_id = staff['id']
+    staff_name = staff['name']
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    c.execute('''SELECT e.id, e.name FROM events e
+                 JOIN event_staffing es ON es.event_id=e.id
+                 WHERE es.staff_id=? AND es.confirmed=1 AND e.date=?
+                 LIMIT 1''', (staff_id, today))
+    event = c.fetchone()
+    event_id = event['id'] if event else None
+    event_name = event['name'] if event else 'Unknown'
+
+    incident_id = str(uuid.uuid4())
+    c.execute('''INSERT INTO incidents (id, staff_id, event_id, description, severity, reported_at)
+                 VALUES (?, ?, ?, ?, ?, ?)''',
+              (incident_id, staff_id, event_id, raw_desc, severity, datetime.utcnow().isoformat()))
+    conn.commit()
     conn.close()
 
-    return render_template('admin_tips.html', tips=tips, total_tips=total_tips,
-                          date_from=date_from, date_to=date_to,
-                          admin_name=session.get('admin_name'))
+    manager_phone = get_manager_phone()
+    if manager_phone:
+        sev_emoji = {'high': '🔴', 'medium': '🟡', 'low': '🟢'}[severity]
+        msg = (f"{sev_emoji} INCIDENT REPORT\n\nStaff: {staff_name}\n"
+               f"Event: {event_name}\nSeverity: {severity.upper()}\nDescription: {raw_desc}")
+        send_sms_alert(manager_phone, msg)
 
-
-@app.route('/admin/tips/export')
-@login_required
-def tips_export():
-    """Download tips as CSV."""
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''SELECT s.name, s.id as employee_id, e.name as event_name,
-                        t.amount, t.tip_type, t.recorded_at
-                 FROM tip_entries t
-                 JOIN staff s ON t.staff_id=s.id
-                 LEFT JOIN events e ON t.event_id=e.id
-                 ORDER BY t.recorded_at DESC''')
-    rows = c.fetchall()
-    conn.close()
-
-    import io, csv
-    output = io.StringIO()
-    w = csv.writer(output)
-    w.writerow(['Employee ID', 'Name', 'Event', 'Amount', 'Type', 'Date'])
-    for r in rows:
-        w.writerow([r['employee_id'], r['staff_name'], r['event_name'] or '',
-                   f"${r['amount']:.2f}", r['tip_type'], r['recorded_at'][:10]])
-    output.seek(0)
-    return output.getvalue(), 200, {
-        'Content-Type': 'text/csv',
-        'Content-Disposition': 'attachment; filename=tips.csv'
-    }
-
-
-
-
-TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
-TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
-TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
+    sev_label = {'high': '🔴 HIGH', 'medium': '🟡 MEDIUM', 'low': '🟢 LOW'}[severity]
+    return (f"✅ Incident logged.\nSeverity: {sev_label}\n"
+            "Your manager has been notified. Thank you."), None
 
 @app.route('/sms/webhook', methods=['GET', 'POST'])
 def sms_webhook():
@@ -1178,24 +1040,26 @@ def sms_webhook():
             answer, next_step = get_onboarding_status(from_number)
         elif upper_body == 'QUIT':
             answer, next_step = quit_onboarding(from_number)
-        elif upper_body in ('IN', 'OUT', 'YES', 'NO', 'Y', 'N'):
-            # Timesheet commands
-            if upper_body in ('YES', 'NO', 'Y', 'N'):
-                answer, next_step = handle_break_response(from_number, body), None
-            elif upper_body == 'IN':
+        elif upper_body in ('IN', 'OUT'):
+            if upper_body == 'IN':
                 answer, next_step = handle_clock(from_number, body, 'IN')
             else:
                 answer, next_step = handle_clock(from_number, body, 'OUT')
-        elif upper_body.startswith('PAYROLL'):
-            # Payroll export link
-            link = request.host_url + 'admin/payroll_export'
-            answer = (f"Payroll Export\n\n"
-                      f"Download your payroll report here:\n{link}\n\n"
-                      f"This link covers the current month.")
+        elif upper_body in ('YES', 'NO', 'Y', 'N'):
+            answer = handle_break_response(from_number, body)
+            next_step = None
+        elif upper_body.startswith('BREAK'):
+            answer = "Reply YES to start a break, or NO to cancel."
             next_step = None
         elif upper_body.startswith('TIP'):
-            # Tip logging
             answer, next_step = handle_tip(from_number, body)
+        elif upper_body.startswith('INCIDENT'):
+            answer, next_step = handle_incident(from_number, body)
+        elif upper_body.startswith('PAYROLL'):
+            link = request.host_url + 'admin/payroll_export'
+            answer = (f"Payroll Export\n\nDownload your payroll report:\n{link}\n"
+                      "This link covers the current month.")
+            next_step = None
         else:
             # Hand off to FAQ bot
             answer = find_best_faq_answer(body)
