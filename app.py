@@ -467,7 +467,7 @@ def sms_webhook():
                 app.logger.error(f'Twilio send error: {e}')
 
         # Respond with TwiML
-        from twilio.twiml import MessagingResponse
+        from twilio.twiml.messaging_response import MessagingResponse
         resp = MessagingResponse()
         resp.message(answer)
         return str(resp), 200, {'Content-Type': 'text/xml'}
