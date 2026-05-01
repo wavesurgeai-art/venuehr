@@ -152,7 +152,10 @@ def init_db():
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS venue_config (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        venue_name TEXT NOT NULL DEFAULT 'Our Venue'
+        venue_name TEXT NOT NULL DEFAULT 'Our Venue',
+        manager_phone TEXT DEFAULT '',
+        tip_pool_enabled INTEGER DEFAULT 0,
+        tipout_rate REAL DEFAULT 0.20
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
@@ -698,6 +701,56 @@ def events_list():
     conn.close()
     return render_template('admin_events.html', events=events, admin_name=session.get('admin_name'))
 
+@app.route('/admin/timesheets', methods=['GET'])
+@login_required
+def timesheets():
+    """View clock entries and timesheet summary."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT t.id, t.clock_in, t.clock_out, t.break_compliant, t.total_hours,
+                        t.recorded_at, s.name, s.role
+                 FROM timesheet_entries t
+                 LEFT JOIN staff s ON t.staff_id = s.id
+                 ORDER BY t.recorded_at DESC LIMIT 50''')
+    entries = c.fetchall()
+    conn.close()
+    return render_template('admin_timesheets.html', entries=entries, admin_name=session.get('admin_name'))
+
+@app.route('/admin/tips', methods=['GET'])
+@login_required
+def admin_tips():
+    """View tip entries summary."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT ti.id, ti.amount, ti.recorded_at, s.name, s.role
+                 FROM tip_entries ti
+                 LEFT JOIN staff s ON ti.staff_id = s.id
+                 ORDER BY ti.recorded_at DESC LIMIT 50''')
+    tips = c.fetchall()
+    conn.close()
+    return render_template('admin_tips.html', tips=tips, admin_name=session.get('admin_name'))
+
+@app.route('/admin/settings', methods=['GET', 'POST'])
+@login_required
+def venue_settings():
+    """Manage venue settings."""
+    conn = get_db()
+    c = conn.cursor()
+    if request.method == 'POST':
+        venue_name = request.form.get('venue_name', 'Our Venue')
+        manager_phone = request.form.get('manager_phone', '')
+        tip_pool = request.form.get('tip_pool_enabled', '')
+        tip_rate = request.form.get('tipout_rate', '0.20')
+        c.execute('DELETE FROM venue_config WHERE id = 1')
+        c.execute('INSERT INTO venue_config (id, venue_name, manager_phone, tip_pool_enabled, tipout_rate) VALUES (1, ?, ?, ?, ?)',
+                  (venue_name, manager_phone, bool(tip_pool), float(tip_rate)))
+        conn.commit()
+        flash('Settings saved.', 'success')
+    c.execute('SELECT * FROM venue_config WHERE id = 1')
+    row = c.fetchone()
+    conn.close()
+    return render_template('admin_settings.html', settings=row, admin_name=session.get('admin_name'))
+
 def send_sms_alert(phone, message):
     """Send an outbound SMS (uses Twilio if configured)."""
     if not phone:
@@ -740,7 +793,7 @@ def send_sms_alert(to_phone: str, message: str):
     except Exception:
         app.logger.error('Failed to send SMS alert')
 
-# ─── Timesheet Handlers ─────────────────────────────────────────────────────────
+# ─── Timesheet Handlers ──────────────────��──────────────────────────────────────
 
 def handle_clock(phone: str, body: str, action: str):
     """Handle IN or OUT SMS commands."""

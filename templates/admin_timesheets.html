@@ -3,64 +3,36 @@
 {% block title %}Timesheets — VenueHR{% endblock %}
 
 {% block content %}
-<div class="mb-8 flex items-center justify-between">
-    <div>
-        <h1 class="text-2xl font-bold text-gray-900">Timesheet Entries</h1>
-        <p class="text-gray-500">Recent clock-in/out records</p>
-    </div>
-    <a href="{{ url_for('payroll_export') }}" class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">
-        ⬇ Download CSV
-    </a>
-</div>
+<h1 class="text-2xl font-bold text-gray-900 mb-6">Timesheets</h1>
 
-<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
     {% if entries %}
     <table class="w-full text-sm">
         <thead>
-            <tr class="text-left text-gray-500 border-b bg-gray-50">
-                <th class="p-4 font-medium">Staff</th>
-                <th class="p-4 font-medium">Event</th>
-                <th class="p-4 font-medium">Clock In</th>
-                <th class="p-4 font-medium">Clock Out</th>
-                <th class="p-4 font-medium">Hours</th>
-                <th class="p-4 font-medium">Break Taken</th>
+            <tr class="text-left text-gray-500 border-b">
+                <th class="pb-3">Staff</th>
+                <th class="pb-3">Role</th>
+                <th class="pb-3">Clock In</th>
+                <th class="pb-3">Clock Out</th>
+                <th class="pb-3">Hours</th>
+                <th class="pb-3">Break</th>
             </tr>
         </thead>
-        <tbody class="divide-y">
-            {% for e in entries %}
-            <tr>
-                <td class="p-4">
-                    <div class="font-medium text-gray-900">{{ e.name }}</div>
-                    <div class="text-xs text-gray-400">{{ e.staff_phone or '' }} · {{ e.staff_role }}</div>
-                </td>
-                <td class="p-4 text-gray-700">{{ e.event_name or '—' }}</td>
-                <td class="p-4 text-gray-700">{{ e.clock_in[:16] if e.clock_in else '—' }}</td>
-                <td class="p-4 text-gray-700">{{ e.clock_out[:16] if e.clock_out else '—' }}</td>
-                <td class="p-4">
-                    {% if e.clock_in and e.clock_out %}
-                        {% set diff = (datetime.fromisoformat(e.clock_out) - datetime.fromisoformat(e.clock_in)).total_seconds() / 3600 %}
-                        <span class="font-medium">{{ "%.1f"|format(diff) }}h</span>
-                    {% else %}
-                        <span class="text-amber-500 font-medium">Open</span>
-                    {% endif %}
-                </td>
-                <td class="p-4">
-                    {% if e.break_taken %}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Yes</span>
-                    {% elif e.clock_out %}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">No</span>
-                    {% else %}
-                    <span class="text-gray-400">—</span>
-                    {% endif %}
-                </td>
+        <tbody>
+            {% for entry in entries %}
+            <tr class="border-b">
+                <td class="py-3">{{ entry.name or 'Unknown' }}</td>
+                <td class="py-3 capitalize">{{ entry.role or 'N/A' }}</td>
+                <td class="py-3">{{ entry.clock_in or '—' }}</td>
+                <td class="py-3">{{ entry.clock_out or '—' }}</td>
+                <td class="py-3">{{ entry.total_hours or 0 }}</td>
+                <td class="py-3">{{ 'Yes' if entry.break_compliant else 'No' }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <div class="p-12 text-center text-gray-400">
-        No timesheet entries yet. Staff can clock in by texting IN to your Twilio number.
-    </div>
+    <p class="text-gray-500 text-center py-8">No timesheet entries yet. Staff can clock in via SMS.</p>
     {% endif %}
 </div>
 {% endblock %}

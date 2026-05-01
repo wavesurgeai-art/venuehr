@@ -3,40 +3,35 @@
 {% block title %}Settings — VenueHR{% endblock %}
 
 {% block content %}
-<div class="mb-8">
-    <h1 class="text-2xl font-bold text-gray-900">Venue Settings</h1>
-    <p class="text-gray-500">Configure venue name, manager contact, and tip pool</p>
-</div>
+<h1 class="text-2xl font-bold text-gray-900 mb-6">Venue Settings</h1>
 
-<div class="max-w-2xl">
-    <form method="POST" class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 space-y-6">
-        <div>
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 max-w-lg">
+    <form method="POST">
+        <div class="mb-4">
             <label class="block text-sm font-medium text-gray-700 mb-1">Venue Name</label>
-            <input name="venue_name" value="{{ settings.venue_name or 'Our Venue' }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500 focus:border-rose-500">
+            <input type="text" name="venue_name" value="{{ settings.venue_name if settings else 'Our Venue' }}"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-rose-500">
         </div>
-        <div>
+        <div class="mb-4">
             <label class="block text-sm font-medium text-gray-700 mb-1">Manager Phone (for alerts)</label>
-            <input name="manager_phone" value="{{ settings.manager_phone or '' }}" placeholder="+1XXXXXXXXXX" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500 focus:border-rose-500">
+            <input type="text" name="manager_phone" value="{{ settings.manager_phone if settings else '' }}"
+                   placeholder="+1234567890" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-rose-500">
         </div>
-        <hr>
-        <div>
-            <h3 class="text-lg font-semibold text-gray-900 mb-3">Tip Pool Configuration</h3>
-            <div class="flex items-center gap-3 mb-3">
-                <input type="checkbox" name="tip_pool_enabled" id="tip_pool_enabled" value="1"
-                    {% if settings.tip_pool_enabled %}checked{% endif %}
-                    class="w-4 h-4 text-rose-600 rounded focus:ring-rose-500">
-                <label for="tip_pool_enabled" class="text-sm font-medium text-gray-700">Enable Tip Pool / Tipout</label>
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Tipout Rate (e.g. 0.20 = 20%)</label>
-                <input name="tipout_rate" type="number" step="0.01" min="0" max="1"
-                    value="{{ settings.tipout_rate or 0 }}"
-                    class="w-32 border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500 focus:border-rose-500">
-                <span class="text-sm text-gray-500 ml-2">{{ "%.0f"|format((settings.tipout_rate or 0) * 100) }}%</span>
-            </div>
-            <p class="text-xs text-gray-400 mt-1">Example: 20% tipout means for every $100 in tips, $20 is distributed among all confirmed staff.</p>
+        <div class="mb-4">
+            <label class="flex items-center gap-2">
+                <input type="checkbox" name="tip_pool_enabled" value="1"
+                       {% if settings and settings.tip_pool_enabled %}checked{% endif %}
+                       class="h-4 w-4 text-rose-600 rounded">
+                <span class="text-sm text-gray-700">Enable Tip Pool</span>
+            </label>
         </div>
-        <button type="submit" class="bg-rose-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">
+        <div class="mb-6">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Tipout Rate (e.g. 0.20 for 20%)</label>
+            <input type="number" step="0.01" name="tipout_rate"
+                   value="{{ settings.tipout_rate if settings else '0.20' }}"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-rose-500">
+        </div>
+        <button type="submit" class="w-full bg-rose-600 text-white py-2 rounded-lg font-medium hover:bg-rose-700">
             Save Settings
         </button>
     </form>
