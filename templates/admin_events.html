@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Events — VenueHR{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold text-gray-900 mb-6">Events</h1>
+
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 mb-6">
+    <h2 class="text-lg font-semibold mb-4">Add New Event</h2>
+    <form method="POST" class="flex gap-4 items-end flex-wrap">
+        <div>
+            <label class="block text-sm text-gray-500 mb-1">Event Name</label>
+            <input type="text" name="name" required placeholder="Smith Wedding" class="border rounded px-3 py-2">
+        </div>
+        <div>
+            <label class="block text-sm text-gray-500 mb-1">Date</label>
+            <input type="date" name="date" required class="border rounded px-3 py-2">
+        </div>
+        <div>
+            <label class="block text-sm text-gray-500 mb-1">Guest Count</label>
+            <input type="number" name="guest_count" required placeholder="150" class="border rounded px-3 py-2">
+        </div>
+        <button type="submit" class="bg-rose-600 text-white px-4 py-2 rounded hover:bg-rose-700">Add Event</button>
+    </form>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+    {% if events %}
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left text-gray-500 border-b">
+                <th class="pb-3">Event</th>
+                <th class="pb-3">Date</th>
+                <th class="pb-3">Guests</th>
+                <th class="pb-3">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in events %}
+            <tr class="border-b">
+                <td class="py-3">{{ event.name }}</td>
+                <td class="py-3">{{ event.date }}</td>
+                <td class="py-3">{{ event.guest_count }}</td>
+                <td class="py-3">
+                    <a href="{{ url_for('staffing_detail', event_id=event.id) }}" class="text-rose-600 hover:underline">Staffing</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-gray-500 text-center py-8">No events yet.</p>
+    {% endif %}
+</div>
+{% endblock %}
