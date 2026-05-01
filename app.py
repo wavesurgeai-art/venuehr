@@ -606,7 +606,7 @@ def staffing_matrix():
     conn.close()
     return render_template('admin_staffing.html', events=events, all_staff=all_staff, admin_name=session.get('admin_name'))
 
-@app.route('/admin/staffing/<event_id>')
+@app.route('/admin/staffing/<event_id>', methods=['GET', 'POST'])
 @login_required
 def staffing_detail(event_id):
     """Staffing plan for a specific event."""
@@ -616,7 +616,20 @@ def staffing_detail(event_id):
     event = c.fetchone()
     if not event:
         flash('Event not found.', 'error')
+        conn.close()
         return redirect(url_for('staffing_matrix'))
+
+    if request.method == 'POST':
+        staff_id = request.form.get('staff_id')
+        role = request.form.get('role')
+        if staff_id and role:
+            c.execute('INSERT INTO event_staffing (id, event_id, staff_id, role, confirmed) VALUES (?, ?, ?, ?, 0)',
+                     (str(uuid.uuid4()), event_id, staff_id, role))
+            conn.commit()
+            flash(f'{role} assigned.', 'success')
+        conn.close()
+        return redirect(url_for('staffing_detail', event_id=event_id))
+
     c.execute('''SELECT es.*, s.name as staff_name, s.phone as staff_phone
                  FROM event_staffing es JOIN staff s ON es.staff_id=s.id
                  WHERE es.event_id=?''', (event_id,))
