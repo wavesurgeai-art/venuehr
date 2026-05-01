@@ -24,20 +24,24 @@ app.config['UPLOAD_FOLDER'] = '/home/team/shared/static/uploads'
 app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # 2MB max
 
 # ─── Email (Gmail SMTP) ────────────────────────────────────────────────────────
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', 'wavesurgeai@gmail.com')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', 'znkycworkml')  # App password
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME', 'wavesurgeai@gmail.com')
+MAIL_USERNAME = os.environ.get('MAIL_USERNAME', '')
+MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
+MAIL_FROM = os.environ.get('MAIL_USERNAME', 'wavesurgeai@gmail.com')
 
 def send_email(to, subject, body):
-    """Send an email via Gmail SMTP. Falls back silently if not configured."""
+    """Send an email via Gmail SMTP using stdlib smtplib."""
+    import smtplib
+    if not MAIL_USERNAME or not MAIL_PASSWORD:
+        app.logger.warning('Email not configured — set MAIL_USERNAME and MAIL_PASSWORD env vars')
+        return False
     try:
-        from flask_mail import Mail, Message
-        mail = Mail(app)
-        msg = Message(subject, recipients=[to], body=body)
-        mail.send(msg)
+        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(MAIL_USERNAME, MAIL_PASSWORD)
+            msg = f'From: {MAIL_FROM}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}'
+            server.sendmail(MAIL_FROM, to, msg)
         app.logger.info(f'Email sent to {to}: {subject}')
         return True
     except Exception as e:
