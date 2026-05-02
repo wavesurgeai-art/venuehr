@@ -353,7 +353,25 @@ def staff_list():
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)''',
                   (staff_id, 'default', name, email, phone, role, hire_date, token, now))
         conn.commit()
-        flash(f'Staff member added. Onboarding link: {request.host_url}onboard/{token}', 'success')
+        onboarding_link = f'{request.host_url}onboard/{token}'
+        venue_name = get_venue_name()
+        # Send welcome email with onboarding link
+        email_body = f"""Hi {name},
+
+        Welcome to {venue_name}! We're excited to have you on the team.
+
+        Please complete your onboarding by clicking the link below:
+        {onboarding_link}
+
+        This link will take you to your Staff Uniform & Professional Conduct Agreement. After signing, you'll receive SMS instructions to complete the remaining steps.
+
+        If you have any questions, please contact your manager.
+
+        See you soon!
+        """
+        if email:
+            send_email(email, f'Welcome to {venue_name} — Onboarding', email_body)
+        flash(f'Staff member added. Onboarding link: {onboarding_link}', 'success')
         conn.close()
         return redirect(url_for('staff_list'))
     c.execute('SELECT * FROM staff ORDER BY created_at DESC')
@@ -729,6 +747,22 @@ def timesheets():
     conn.close()
     return render_template('admin_timesheets.html', entries=entries, admin_name=session.get('admin_name'))
 
+@app.route('/admin/incidents')
+@login_required
+def admin_incidents():
+    """View incident log."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT i.*, s.name as staff_name, e.name as event_name
+                 FROM incidents i
+                 LEFT JOIN staff s ON i.staff_id=s.id
+                 LEFT JOIN events e ON i.event_id=e.id
+                 ORDER BY i.reported_at DESC LIMIT 100''')
+    incidents = c.fetchall()
+    conn.close()
+    return render_template('admin_incidents.html', incidents=incidents,
+                          admin_name=session.get('admin_name'))
+
 @app.route('/admin/tips', methods=['GET'])
 @login_required
 def admin_tips():
@@ -742,6 +776,35 @@ def admin_tips():
     tips = c.fetchall()
     conn.close()
     return render_template('admin_tips.html', tips=tips, admin_name=session.get('admin_name'))
+
+@app.route('/admin/payroll_export')
+@login_required
+def payroll_export():
+    """Export timesheet data as CSV."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT s.name, s.id as employee_id, e.name as event_name,
+                       t.clock_in, t.clock_out, t.total_hours, t.break_compliant
+                FROM timesheet_entries t
+                JOIN staff s ON t.staff_id=s.id
+                LEFT JOIN events e ON t.event_id=e.id
+                WHERE t.clock_out IS NOT NULL
+                ORDER BY t.clock_in DESC''')
+    rows = c.fetchall()
+    conn.close()
+    import io, csv
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Employee Name', 'Employee ID', 'Event', 'Clock In', 'Clock Out', 'Total Hours', 'Break Compliant'])
+    for r in rows:
+        writer.writerow([r['name'], r['employee_id'], r['event_name'] or '',
+                         r['clock_in'] or '', r['clock_out'] or '',
+                         r['total_hours'] or 0, 'Yes' if r['break_compliant'] else 'No'])
+    output.seek(0)
+    return output.getvalue(), 200, {
+        'Content-Type': 'text/csv',
+        'Content-Disposition': 'attachment; filename=payroll_export.csv'
+    }
 
 @app.route('/admin/settings', methods=['GET', 'POST'])
 @login_required
