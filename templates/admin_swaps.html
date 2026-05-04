@@ -1,74 +1,74 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shift Swap Requests — VenueHR</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #333; }
-        .navbar { background: #1a1a2e; color: #fff; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
-        .navbar h1 { font-size: 1.25rem; }
-        .navbar a { color: #a78bfa; text-decoration: none; }
-        .container { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; }
-        .card { background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
-        .badge { display: inline-block; padding: 3px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; }
-        .badge-pending { background: #fef9c3; color: #854d0e; }
-        .badge-approved { background: #dcfce7; color: #166534; }
-        .badge-denied { background: #fee2e2; color: #991b1b; }
-        table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; padding: 0.75rem 1rem; border-bottom: 2px solid #e5e7eb; color: #6b7280; font-size: 0.75rem; text-transform: uppercase; }
-        td { padding: 0.875rem 1rem; border-bottom: 1px solid #f3f4f6; }
-        .empty { text-align: center; color: #9ca3af; padding: 3rem; }
-    </style>
-</head>
-<body>
-    <div class="navbar">
-        <h1>🔄 Shift Swap Requests</h1>
-        <a href="/admin">← Dashboard</a>
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">🔄 Shift Swap Requests</h1>
+</div>
+
+{# Stats row #}
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <div class="text-2xl font-bold text-amber-500">{{ pending_count }}</div>
+        <div class="text-sm text-gray-500 mt-1">Pending Review</div>
     </div>
-    <div class="container">
-        <div class="card">
-            {% if swaps %}
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Staff</th>
-                        <th>Event ID</th>
-                        <th>Reason</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for swap in swaps %}
-                    <tr>
-                        <td style="white-space:nowrap">{{ swap.created_at[:16] }}</td>
-                        <td>
-                            <strong>{{ swap.name }}</strong><br>
-                            <span style="color:#6b7280;font-size:0.8rem">{{ swap.phone }}</span>
-                        </td>
-                        <td>{{ swap.event_id }}</td>
-                        <td>{{ swap.reason }}</td>
-                        <td>
-                            {% if swap.status == 'pending' %}
-                            <span class="badge badge-pending">⏳ Pending</span>
-                            {% elif swap.status == 'approved' %}
-                            <span class="badge badge-approved">✅ Approved</span>
-                            {% else %}
-                            <span class="badge badge-denied">❌ Denied</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="empty">
-                <p>No swap requests yet. ✅</p>
-            </div>
-            {% endif %}
-        </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <div class="text-2xl font-bold text-green-600">{{ approved_count }}</div>
+        <div class="text-sm text-gray-500 mt-1">Approved</div>
     </div>
-</body>
-</html>
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <div class="text-2xl font-bold text-red-600">{{ denied_count }}</div>
+        <div class="text-sm text-gray-500 mt-1">Denied</div>
+    </div>
+</div>
+
+{# How to respond reminder #}
+<div class="bg-rose-50 border border-rose-200 rounded-lg p-4 mb-6 text-sm text-rose-800">
+    <strong>ℹ️ How to respond to swap requests:</strong> When you receive a SWAP SMS from a staff member,
+    reply <code class="bg-rose-100 px-1 rounded">APPROVE [phone]</code> or <code class="bg-rose-100 px-1 rounded">DENY [phone]</code>.
+    The staff member will be notified automatically.
+</div>
+
+<div class="bg-white rounded-xl border border-gray-200">
+    {% if swaps %}
+    <table class="w-full">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Staff</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Event ID</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Reason</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {% for swap in swaps %}
+            <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3 text-sm whitespace-nowrap">{{ swap.created_at[:16] }}</td>
+                <td class="px-4 py-3">
+                    <div class="font-medium text-gray-900">{{ swap.name }}</div>
+                    <div class="text-xs text-gray-400">{{ swap.phone }}</div>
+                </td>
+                <td class="px-4 py-3 text-sm font-mono text-gray-600">{{ swap.event_id }}</td>
+                <td class="px-4 py-3 text-sm text-gray-700 max-w-xs truncate">{{ swap.reason }}</td>
+                <td class="px-4 py-3">
+                    {% if swap.status == 'pending' %}
+                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">⏳ Pending</span>
+                    {% elif swap.status == 'approved' %}
+                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">✅ Approved</span>
+                    {% else %}
+                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800">❌ Denied</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="text-center py-16 text-gray-400">
+        <div class="text-4xl mb-3">🔄</div>
+        <div class="text-lg font-medium">No swap requests</div>
+        <div class="text-sm mt-1">Staff can submit swap requests via SMS using <code class="bg-gray-100 px-1 rounded">SWAP [event_id] [reason]</code></div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
