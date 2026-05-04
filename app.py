@@ -233,6 +233,24 @@ def init_db():
         venue_address TEXT,
         venue_phone TEXT
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS shift_swap_requests (
+        id TEXT PRIMARY KEY,
+        staff_id TEXT NOT NULL,
+        event_id TEXT,
+        reason TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS performance_ratings (
+        id TEXT PRIMARY KEY,
+        staff_id TEXT NOT NULL,
+        event_id TEXT,
+        rating INTEGER NOT NULL,
+        comment TEXT,
+        recorded_at TEXT NOT NULL,
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+    )''')
     # Seed default venue config
     c.execute('INSERT OR IGNORE INTO venue_config (id, venue_name) VALUES (1, ?)', ('Our Venue',))
     c.execute('INSERT OR IGNORE INTO venue_settings (id, tip_pool_enabled, tipout_rate) VALUES (1, 0, 20.0)')
@@ -806,6 +824,37 @@ def payroll_export():
         'Content-Disposition': 'attachment; filename=payroll_export.csv'
     }
 
+@app.route('/admin/swaps')
+@login_required
+def admin_swaps():
+    """View and manage shift swap requests."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT s.id, s.name, s.phone, r.event_id, r.reason, r.status, r.created_at
+                 FROM shift_swap_requests r
+                 JOIN staff s ON r.staff_id=s.id
+                 ORDER BY r.created_at DESC LIMIT 50''')
+    swaps = c.fetchall()
+    conn.close()
+    return render_template('admin_swaps.html', swaps=swaps,
+                          admin_name=session.get('admin_name'))
+
+@app.route('/admin/ratings')
+@login_required
+def admin_ratings():
+    """View performance ratings by staff."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT AVG(r.rating) as avg_rating, COUNT(*) as count, s.name, s.role
+                 FROM performance_ratings r
+                 JOIN staff s ON r.staff_id=s.id
+                 GROUP BY r.staff_id
+                 ORDER BY avg_rating DESC''')
+    ratings = c.fetchall()
+    conn.close()
+    return render_template('admin_ratings.html', ratings=ratings,
+                          admin_name=session.get('admin_name'))
+
 @app.route('/admin/settings', methods=['GET', 'POST'])
 @login_required
 def venue_settings():
@@ -1125,6 +1174,93 @@ def handle_incident(phone: str, body: str):
     return (f"✅ Incident logged.\nSeverity: {sev_label}\n"
             "Your manager has been notified. Thank you."), None
 
+# ─── Shift Swap Request ───────────────────────────────────────────────────────
+
+def handle_swap_request(phone: str, body: str):
+    """Handle 'SWAP [event_id] [reason]' SMS command."""
+    m = re.match(r'^SWAP\s+(\S+)(?:\s+(.+))?', body.strip(), re.IGNORECASE)
+    if not m:
+        return ("To request a shift swap, reply SWAP followed by the event ID and reason.\n"
+                "Example: SWAP ABC123 Needs to attend a family event\n"
+                "Your manager will review and respond."), None
+
+    event_id = m.group(1).strip()
+    reason = (m.group(2) or 'No reason provided').strip()
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id, name FROM staff WHERE phone=?', (phone,))
+    staff = c.fetchone()
+    if not staff:
+        conn.close()
+        return "I don't recognize that phone number. Please contact your manager.", None
+
+    staff_id = staff['id']
+    staff_name = staff['name']
+
+    swap_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+    c.execute('''INSERT INTO shift_swap_requests (id, staff_id, event_id, reason, status, created_at)
+                 VALUES (?, ?, ?, ?, 'pending', ?)''',
+              (swap_id, staff_id, event_id, reason, now.isoformat()))
+    conn.commit()
+    conn.close()
+
+    manager_phone = get_manager_phone()
+    if manager_phone:
+        msg = (f"🔄 SHIFT SWAP REQUEST\n\nStaff: {staff_name}\n"
+               f"Event ID: {event_id}\nReason: {reason}\n"
+               "Reply APPROVE or DENY to this request.")
+        send_sms_alert(manager_phone, msg)
+
+    return (f"✅ Shift swap request submitted.\n"
+            f"Event: {event_id}\nReason: {reason}\n"
+            "Your manager has been notified. You'll receive a response shortly."), None
+
+# ─── Performance Rating ───────────────────────────────────────────────────────
+
+def handle_rating(phone: str, body: str):
+    """Handle 'RATE [1-5] [comment]' SMS command."""
+    m = re.match(r'^RATE\s+([1-5])(?:\s+(.+))?', body.strip(), re.IGNORECASE)
+    if not m:
+        return ("To rate your shift, reply RATE followed by a number 1-5 and an optional comment.\n"
+                "Example: RATE 5 Great team atmosphere!\n"
+                "5 = Excellent | 1 = Poor"), None
+
+    rating = int(m.group(1))
+    comment = (m.group(2) or '').strip()
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id, name FROM staff WHERE phone=?', (phone,))
+    staff = c.fetchone()
+    if not staff:
+        conn.close()
+        return "I don't recognize that phone number.", None
+
+    staff_id = staff['id']
+
+    # Find today's event
+    c.execute('''SELECT e.id, e.name FROM events e
+                 JOIN event_staffing es ON es.event_id=e.id
+                 WHERE es.staff_id=? AND es.confirmed=1 AND e.date=?
+                 LIMIT 1''', (staff_id, today))
+    event = c.fetchone()
+    event_id = event['id'] if event else None
+
+    rating_id = str(uuid.uuid4())
+    c.execute('''INSERT INTO performance_ratings (id, staff_id, event_id, rating, comment, recorded_at)
+                 VALUES (?, ?, ?, ?, ?, ?)''',
+              (rating_id, staff_id, event_id, rating, comment, datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
+
+    stars = '⭐' * rating
+    return (f"✅ Rating recorded: {stars}\n"
+            f"Comment: {comment if comment else '(no comment)'}\n"
+            "Thank you for your feedback!"), None
+
 @app.route('/sms/webhook', methods=['GET', 'POST'])
 def sms_webhook():
     """Twilio SMS webhook — routes to onboarding bot or FAQ auto-reply."""
@@ -1188,6 +1324,10 @@ def sms_webhook():
             answer, next_step = handle_tip(from_number, body)
         elif upper_body.startswith('INCIDENT'):
             answer, next_step = handle_incident(from_number, body)
+        elif upper_body.startswith('SWAP'):
+            answer, next_step = handle_swap_request(from_number, body)
+        elif upper_body.startswith('RATE '):
+            answer, next_step = handle_rating(from_number, body)
         elif upper_body.startswith('PAYROLL'):
             link = request.host_url + 'admin/payroll_export'
             answer = (f"Payroll Export\n\nDownload your payroll report:\n{link}\n"

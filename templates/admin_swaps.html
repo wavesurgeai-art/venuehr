@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shift Swap Requests — VenueHR</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #333; }
+        .navbar { background: #1a1a2e; color: #fff; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .navbar h1 { font-size: 1.25rem; }
+        .navbar a { color: #a78bfa; text-decoration: none; }
+        .container { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; }
+        .card { background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
+        .badge { display: inline-block; padding: 3px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; }
+        .badge-pending { background: #fef9c3; color: #854d0e; }
+        .badge-approved { background: #dcfce7; color: #166534; }
+        .badge-denied { background: #fee2e2; color: #991b1b; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 0.75rem 1rem; border-bottom: 2px solid #e5e7eb; color: #6b7280; font-size: 0.75rem; text-transform: uppercase; }
+        td { padding: 0.875rem 1rem; border-bottom: 1px solid #f3f4f6; }
+        .empty { text-align: center; color: #9ca3af; padding: 3rem; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>🔄 Shift Swap Requests</h1>
+        <a href="/admin">← Dashboard</a>
+    </div>
+    <div class="container">
+        <div class="card">
+            {% if swaps %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Staff</th>
+                        <th>Event ID</th>
+                        <th>Reason</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for swap in swaps %}
+                    <tr>
+                        <td style="white-space:nowrap">{{ swap.created_at[:16] }}</td>
+                        <td>
+                            <strong>{{ swap.name }}</strong><br>
+                            <span style="color:#6b7280;font-size:0.8rem">{{ swap.phone }}</span>
+                        </td>
+                        <td>{{ swap.event_id }}</td>
+                        <td>{{ swap.reason }}</td>
+                        <td>
+                            {% if swap.status == 'pending' %}
+                            <span class="badge badge-pending">⏳ Pending</span>
+                            {% elif swap.status == 'approved' %}
+                            <span class="badge badge-approved">✅ Approved</span>
+                            {% else %}
+                            <span class="badge badge-denied">❌ Denied</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty">
+                <p>No swap requests yet. ✅</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
