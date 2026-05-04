@@ -1,72 +1,73 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Performance Ratings — VenueHR</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #333; }
-        .navbar { background: #1a1a2e; color: #fff; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
-        .navbar h1 { font-size: 1.25rem; }
-        .navbar a { color: #a78bfa; text-decoration: none; }
-        .container { max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
-        .card { background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
-        table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; padding: 0.75rem 1rem; border-bottom: 2px solid #e5e7eb; color: #6b7280; font-size: 0.75rem; text-transform: uppercase; }
-        td { padding: 0.875rem 1rem; border-bottom: 1px solid #f3f4f6; }
-        .rating-bar { display: flex; align-items: center; gap: 0.5rem; }
-        .bar-bg { flex: 1; background: #e5e7eb; border-radius: 8px; height: 8px; }
-        .bar-fill { background: #a78bfa; border-radius: 8px; height: 8px; }
-        .empty { text-align: center; color: #9ca3af; padding: 3rem; }
-        .stars { color: #f59e0b; font-size: 1.1rem; }
-    </style>
-</head>
-<body>
-    <div class="navbar">
-        <h1>⭐ Performance Ratings</h1>
-        <a href="/admin">← Dashboard</a>
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">⭐ Performance Ratings</h1>
+</div>
+
+{# Overall stats #}
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <div class="text-2xl font-bold text-gray-900">{{ ratings|length }}</div>
+        <div class="text-sm text-gray-500 mt-1">Staff Rated</div>
     </div>
-    <div class="container">
-        <div class="card">
-            {% if ratings %}
-            <table>
-                <thead>
-                    <tr>
-                        <th>Staff</th>
-                        <th>Role</th>
-                        <th>Avg Rating</th>
-                        <th>Count</th>
-                        <th>Trend</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for r in ratings %}
-                    <tr>
-                        <td><strong>{{ r.name }}</strong></td>
-                        <td>{{ r.role }}</td>
-                        <td>
-                            <span class="stars">{{ '⭐' * (r.avg_rating|round|int) }}</span>
-                            <strong style="margin-left:0.3rem">{{ r.avg_rating|round(1) }}/5</strong>
-                        </td>
-                        <td>{{ r.count }} shifts</td>
-                        <td>
-                            <div class="rating-bar">
-                                <div class="bar-bg">
-                                    <div class="bar-fill" style="width:{{ (r.avg_rating/5*100)|round|int }}%"></div>
-                                </div>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="empty">
-                <p>No ratings recorded yet.</p>
-            </div>
-            {% endif %}
-        </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <div class="text-2xl font-bold text-amber-500">{{ total_ratings }}</div>
+        <div class="text-sm text-gray-500 mt-1">Total Ratings</div>
     </div>
-</body>
-</html>
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <div class="text-2xl font-bold text-rose-600">{{ overall_avg }}/5</div>
+        <div class="text-sm text-gray-500 mt-1">Platform Average</div>
+    </div>
+</div>
+
+{# How ratings work #}
+<div class="bg-rose-50 border border-rose-200 rounded-lg p-4 mb-6 text-sm text-rose-800">
+    <strong>ℹ️ How ratings work:</strong> Staff rate their shift via SMS with <code class="bg-rose-100 px-1 rounded">RATE [1-5] [comment]</code>.
+    5 = Excellent, 1 = Poor. Ratings are linked to the event worked.
+</div>
+
+<div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+    {% if ratings %}
+    <table class="w-full">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Staff</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Role</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Avg Rating</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Shifts Rated</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Rating Bar</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {% for r in ratings %}
+            <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3">
+                    <div class="font-medium text-gray-900">{{ r.name }}</div>
+                </td>
+                <td class="px-4 py-3 text-sm text-gray-600">{{ r.role }}</td>
+                <td class="px-4 py-3">
+                    <div class="flex items-center gap-1">
+                        <span class="text-amber-400 text-lg">{{ '⭐' * (r.avg_rating|round|int) }}</span>
+                        <span class="font-bold text-gray-900">{{ r.avg_rating|round(1) }}/5</span>
+                    </div>
+                </td>
+                <td class="px-4 py-3 text-sm text-gray-600">{{ r.count }} shifts</td>
+                <td class="px-4 py-3 min-w-32">
+                    <div class="w-full bg-gray-100 rounded-full h-2">
+                        <div class="bg-amber-400 h-2 rounded-full" style="width:{{ (r.avg_rating/5*100)|round|int }}%"></div>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="text-center py-16 text-gray-400">
+        <div class="text-4xl mb-3">⭐</div>
+        <div class="text-lg font-medium">No ratings yet</div>
+        <div class="text-sm mt-1">Staff can rate their shift via SMS: <code class="bg-gray-100 px-1 rounded">RATE 5 [comment]</code></div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

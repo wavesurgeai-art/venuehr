@@ -777,8 +777,14 @@ def admin_incidents():
                  LEFT JOIN events e ON i.event_id=e.id
                  ORDER BY i.reported_at DESC LIMIT 100''')
     incidents = c.fetchall()
+    c.execute('SELECT severity, COUNT(*) as count FROM incidents GROUP BY severity')
+    counts = {row['severity']: row['count'] for row in c.fetchall()}
+    high_count = counts.get('high', 0)
+    medium_count = counts.get('medium', 0)
+    low_count = counts.get('low', 0)
     conn.close()
     return render_template('admin_incidents.html', incidents=incidents,
+                          high_count=high_count, medium_count=medium_count, low_count=low_count,
                           admin_name=session.get('admin_name'))
 
 @app.route('/admin/tips', methods=['GET'])
@@ -835,8 +841,15 @@ def admin_swaps():
                  JOIN staff s ON r.staff_id=s.id
                  ORDER BY r.created_at DESC LIMIT 50''')
     swaps = c.fetchall()
+    c.execute('''SELECT status, COUNT(*) as count FROM shift_swap_requests GROUP BY status''')
+    counts = {row['status']: row['count'] for row in c.fetchall()}
+    pending_count = counts.get('pending', 0)
+    approved_count = counts.get('approved', 0)
+    denied_count = counts.get('denied', 0)
     conn.close()
     return render_template('admin_swaps.html', swaps=swaps,
+                          pending_count=pending_count, approved_count=approved_count,
+                          denied_count=denied_count,
                           admin_name=session.get('admin_name'))
 
 @app.route('/admin/ratings')
@@ -851,8 +864,13 @@ def admin_ratings():
                  GROUP BY r.staff_id
                  ORDER BY avg_rating DESC''')
     ratings = c.fetchall()
+    c.execute('SELECT COUNT(*) as total, AVG(rating) as overall FROM performance_ratings')
+    row = c.fetchone()
+    total_ratings = row['total'] if row else 0
+    overall_avg = round(row['overall'], 1) if row and row['overall'] else 0
     conn.close()
     return render_template('admin_ratings.html', ratings=ratings,
+                          total_ratings=total_ratings, overall_avg=overall_avg,
                           admin_name=session.get('admin_name'))
 
 @app.route('/admin/settings', methods=['GET', 'POST'])
