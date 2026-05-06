@@ -1066,7 +1066,7 @@ def demo_mode():
             c.execute('SELECT id FROM agreements WHERE staff_id = ?', (staff_id,))
             if not c.fetchone():
                 agreement_id = str(uuid.uuid4())
-                c.execute("""INSERT INTO agreements (id, staff_id, signed_at, ip_address, signature_filename, agreement_text)
+                c.execute("""INSERT INTO agreements (id, staff_id, signed_at, ip_address, signature_image, agreement_text)
                                VALUES (?, ?, ?, '127.0.0.1', 'demo_signature.png', ?)""",
                            (agreement_id, staff_id, now.isoformat(),
                             'Staff Uniform & Professional Conduct Agreement — Mustard Seed Gardens'))
