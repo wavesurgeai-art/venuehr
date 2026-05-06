@@ -939,6 +939,131 @@ def seed_data():
     flash(f'Demo data seeded — {count} staff/contractors added.', 'success')
     return redirect(url_for('staff_list'))
 
+@app.route('/demo', methods=['GET'])
+def demo_mode():
+    """Set up a full demo state: seed staff, create venue, create event, seed timesheets, tips, swaps, ratings, incidents."""
+    import uuid
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    venue_id = 'default'
+
+    conn = get_db()
+    c = conn.cursor()
+
+    # ── Seed demo staff ────────────────────────────────────────────────────────
+    staff_records = [
+        ('owner-001', venue_id, 'Margaret E. Hollister',    'margaret@wavesurgeai.com',   '+1 317-555-0101', 'Owner',         '2025-03-01', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('coord-001', venue_id, 'Tyler J. Brennan',          'tyler@wavesurgeai.com',      '+1 317-555-0102', 'Coordinator',   '2025-03-15', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('admin-001', venue_id, 'Samantha R. Whitfield',     'samantha@wavesurgeai.com',   '+1 317-555-0103', 'Administrator', '2025-04-01', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('bart-001', venue_id, 'Darius L. Morrison',         'dmorrison@gmail.com',        '+1 317-555-0201', 'Bartender',     '2025-05-10', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('bart-002', venue_id, "Caitlin M. O'Brien",        'cobrien@gmail.com',          '+1 317-555-0202', 'Bartender',     '2025-05-12', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('bart-003', venue_id, 'Ethan R. Caldwell',          'ecaldwell@gmail.com',        '+1 317-555-0203', 'Bartender',     '2025-05-14', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-001', venue_id, 'Brandon T. Holloway',        'bholloway@gmail.com',        '+1 317-555-0301', 'Server',        '2025-06-01', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-002', venue_id, 'Kayla D. Seymour',           'kseymour@gmail.com',         '+1 317-555-0302', 'Server',        '2025-06-03', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-003', venue_id, 'Marcus J. Navarro',           'mnavarro@gmail.com',         '+1 317-555-0303', 'Server',        '2025-06-05', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('cont-001', venue_id, 'Gourmet & Grace Catering — Rachel Stern',    'rachel@gourmetgrace.com',   '+1 317-555-0401', 'Caterer',      '2025-01-15', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-002', venue_id, 'Focus & Light Photography — David Chen',    'david@focuslightphoto.com', '+1 317-555-0402', 'Photographer', '2025-01-20', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-003', venue_id, 'BeatDrop DJ Services — Marcus Thompson',   'marcus@beatdropservices.com','+1 317-555-0403', 'DJ',           '2025-02-01', uuid.uuid4().hex, 'signed', now.isoformat()),
+    ]
+    for row in staff_records:
+        try:
+            c.execute("""INSERT OR IGNORE INTO staff (id, venue_id, name, email, phone, role, hire_date, onboarding_token, agreement_status, created_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
+        except Exception:
+            pass
+
+    # ── Set venue name ─────────────────────────────────────────────────────────
+    c.execute("INSERT OR IGNORE INTO venue_config (id, venue_name, manager_phone, tip_pool_enabled, tipout_rate) VALUES (1, ?, '+13175550101', 0, 20.0)",
+               ('Mustard Seed Gardens',))
+
+    # ── Create demo event ─────────────────────────────────────────────────────
+    event_id = str(uuid.uuid4())
+    event_date = (now + timedelta(days=14)).strftime('%Y-%m-%d')
+    try:
+        c.execute("""INSERT OR IGNORE INTO events (id, date, name, guest_count, created_at)
+                      VALUES (?, ?, ?, ?, ?)""",
+                  (event_id, event_date, 'Johnson Wedding Reception', 150, now.isoformat()))
+    except Exception:
+        pass
+
+    # ── Pre-confirm some staff for the event ──────────────────────────────────
+    confirmed_pairs = [
+        (str(uuid.uuid4()), event_id, 'bart-001', 'Bartender', 1),
+        (str(uuid.uuid4()), event_id, 'bart-002', 'Bartender', 1),
+        (str(uuid.uuid4()), event_id, 'serv-001', 'Server',    1),
+        (str(uuid.uuid4()), event_id, 'serv-002', 'Server',    1),
+        (str(uuid.uuid4()), event_id, 'serv-003', 'Server',    1),
+        (str(uuid.uuid4()), event_id, 'cont-001', 'Caterer',   1),
+        (str(uuid.uuid4()), event_id, 'cont-002', 'Photographer', 1),
+        (str(uuid.uuid4()), event_id, 'cont-003', 'DJ',        1),
+    ]
+    for row in confirmed_pairs:
+        try:
+            c.execute("INSERT OR IGNORE INTO event_staffing (id, event_id, staff_id, role, confirmed) VALUES (?, ?, ?, ?, ?)", row)
+        except Exception:
+            pass
+
+    # ── Seed timesheet entries (clock in/out for today) ─────────────────────────
+    today = now.strftime('%Y-%m-%d')
+    timesheet_entries = [
+        (str(uuid.uuid4()), 'bart-001', event_id, f'{today} 14:00', f'{today} 22:30', 8.5, 1, now.isoformat()),
+        (str(uuid.uuid4()), 'serv-001', event_id, f'{today} 13:30', f'{today} 22:00', 8.5, 1, now.isoformat()),
+        (str(uuid.uuid4()), 'serv-002', event_id, f'{today} 13:30', f'{today} 22:00', 8.5, 1, now.isoformat()),
+        (str(uuid.uuid4()), 'serv-003', event_id, f'{today} 14:00', f'{today} 22:30', 8.5, 1, now.isoformat()),
+    ]
+    for row in timesheet_entries:
+        try:
+            c.execute("""INSERT OR IGNORE INTO timesheet_entries (id, staff_id, event_id, clock_in, clock_out, total_hours, break_compliant, recorded_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", row)
+        except Exception:
+            pass
+
+    # ── Seed tip entries ───────────────────────────────────────────────────────
+    tip_entries = [
+        (str(uuid.uuid4()), 'bart-001', event_id, 85.00, 'cash', now.isoformat()),
+        (str(uuid.uuid4()), 'serv-001', event_id, 45.00, 'cash', now.isoformat()),
+        (str(uuid.uuid4()), 'serv-002', event_id, 52.00, 'cash', now.isoformat()),
+    ]
+    for row in tip_entries:
+        try:
+            c.execute("""INSERT OR IGNORE INTO tip_entries (id, staff_id, event_id, amount, tip_type, recorded_at)
+                          VALUES (?, ?, ?, ?, ?, ?)""", row)
+        except Exception:
+            pass
+
+    # ── Seed a swap request ────────────────────────────────────────────────────
+    swap_id = str(uuid.uuid4())
+    try:
+        c.execute("""INSERT OR IGNORE INTO shift_swap_requests (id, staff_id, event_id, reason, status, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?)""",
+                  (swap_id, 'serv-003', event_id, 'Family reunion that weekend — can someone cover?', 'pending', now.isoformat()))
+    except Exception:
+        pass
+
+    # ── Seed a performance rating ──────────────────────────────────────────────
+    rating_id = str(uuid.uuid4())
+    try:
+        c.execute("""INSERT OR IGNORE INTO performance_ratings (id, staff_id, event_id, rating, comment, recorded_at)
+                      VALUES (?, ?, ?, ?, ?, ?)""",
+                  (rating_id, 'bart-001', event_id, 5, 'Excellent service — very professional throughout the event.', now.isoformat()))
+    except Exception:
+        pass
+
+    # ── Seed an incident ───────────────────────────────────────────────────────
+    incident_id = str(uuid.uuid4())
+    try:
+        c.execute("""INSERT OR IGNORE INTO incidents (id, staff_id, event_id, description, severity, reported_at)
+                      VALUES (?, ?, ?, ?, ?, ?)""",
+                  (incident_id, 'serv-002', event_id, 'Minor spill in the garden patio area. Cleaned up immediately with no guest complaints.', 'low', now.isoformat()))
+    except Exception:
+        pass
+
+    conn.commit()
+    conn.close()
+
+    flash('Demo data ready — Mustard Seed Gardens, Johnson Wedding, pre-populated staff and activity.', 'success')
+    return redirect(url_for('dashboard'))
+
 @app.route('/admin/settings', methods=['GET', 'POST'])
 @login_required
 def venue_settings():
