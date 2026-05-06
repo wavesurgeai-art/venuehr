@@ -1058,6 +1058,21 @@ def demo_mode():
     except Exception:
         pass
 
+    # ── Sign agreements for "signed" staff ───────────────────────────────────
+    try:
+        c.execute("SELECT id FROM staff WHERE agreement_status = 'signed'")
+        signed_staff_ids = [row['id'] for row in c.fetchall()]
+        for staff_id in signed_staff_ids:
+            c.execute('SELECT id FROM agreements WHERE staff_id = ?', (staff_id,))
+            if not c.fetchone():
+                agreement_id = str(uuid.uuid4())
+                c.execute("""INSERT INTO agreements (id, staff_id, signed_at, ip_address, signature_filename, agreement_text)
+                               VALUES (?, ?, ?, '127.0.0.1', 'demo_signature.png', ?)""",
+                           (agreement_id, staff_id, now.isoformat(),
+                            'Staff Uniform & Professional Conduct Agreement — Mustard Seed Gardens'))
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
