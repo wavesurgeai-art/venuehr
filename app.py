@@ -659,10 +659,16 @@ def staffing_detail(event_id):
         staff_id = request.form.get('staff_id')
         role = request.form.get('role')
         if staff_id and role:
-            c.execute('INSERT INTO event_staffing (id, event_id, staff_id, role, confirmed) VALUES (?, ?, ?, ?, 0)',
-                     (str(uuid.uuid4()), event_id, staff_id, role))
-            conn.commit()
-            flash(f'{role} assigned.', 'success')
+            # Check for duplicate assignment
+            c.execute('SELECT id FROM event_staffing WHERE event_id=? AND staff_id=? AND role=?',
+                     (event_id, staff_id, role))
+            if c.fetchone():
+                flash(f'{role} is already assigned to this event.', 'error')
+            else:
+                c.execute('INSERT INTO event_staffing (id, event_id, staff_id, role, confirmed) VALUES (?, ?, ?, ?, 0)',
+                         (str(uuid.uuid4()), event_id, staff_id, role))
+                conn.commit()
+                flash(f'{role} assigned.', 'success')
         conn.close()
         return redirect(url_for('staffing_detail', event_id=event_id))
 
