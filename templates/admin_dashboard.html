@@ -79,9 +79,12 @@
 <!-- Quick Actions -->
 <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
     <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
-    <div class="flex gap-4">
+    <div class="flex flex-wrap gap-4">
         <a href="{{ url_for('staff_list') }}" class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition">
             View All Staff
+        </a>
+        <a href="{{ url_for('staffing_matrix') }}" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
+            Add New Event
         </a>
         <a href="{{ url_for('staff_list') }}" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
             Add New Staff
