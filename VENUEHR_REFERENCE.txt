@@ -1,0 +1,319 @@
+# VenueHR — Technical Reference
+
+## Overview
+VenueHR is a Flask + SQLite HRaaS platform for wedding venues. Staff interact via SMS; admins manage via web dashboard.
+
+**Live URL:** https://venuehr.onrender.com  
+**Admin PIN:** 1234  
+**GitHub:** https://github.com/wavesurgeai-art/venuehr
+
+---
+
+## Database Schema
+
+### `admins`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | UUID |
+| name | TEXT NOT NULL | |
+| pin_hash | TEXT NOT NULL | bcrypt hashed |
+| created_at | TEXT NOT NULL | ISO timestamp |
+
+### `staff`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | UUID |
+| venue_id | TEXT NOT NULL | |
+| name | TEXT NOT NULL | |
+| email | TEXT NOT NULL | |
+| phone | TEXT | SMS-enabled |
+| role | TEXT NOT NULL | Bartender, Server, Security, Caterer, Photographer, DJ |
+| hire_date | TEXT | |
+| onboarding_token | TEXT UNIQUE | Mailed to staff |
+| agreement_status | TEXT | 'pending', 'sent', 'signed' |
+| created_at | TEXT NOT NULL | |
+
+### `agreements`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | UUID |
+| staff_id | TEXT FK | |
+| signed_at | TEXT NOT NULL | |
+| ip_address | TEXT | |
+| signature_image | TEXT | Filename of stored signature |
+| agreement_text | TEXT | Full text at time of signing |
+
+### `faqs`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | |
+| category | TEXT NOT NULL | |
+| question | TEXT NOT NULL | |
+| answer | TEXT NOT NULL | |
+| keywords | TEXT | Comma-separated |
+| created_at | TEXT NOT NULL | |
+
+### `onboarding_state`
+| Column | Type | Notes |
+|---|---|---|
+| phone | TEXT PK | Staff phone |
+| step | TEXT NOT NULL | 'name', 'role', 'confirm' |
+| context | TEXT | JSON — stores name, role, etc. |
+| updated_at | TEXT NOT NULL | |
+
+### `venue_config`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | Always 1 |
+| venue_name | TEXT | |
+| manager_phone | TEXT | SMS alerts go here |
+| tip_pool_enabled | INTEGER | 0/1 |
+| tipout_rate | REAL | Default 20% |
+
+### `events`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | UUID |
+| date | TEXT NOT NULL | YYYY-MM-DD |
+| name | TEXT NOT NULL | e.g. "Johnson Wedding Reception" |
+| guest_count | INTEGER | |
+| created_at | TEXT NOT NULL | |
+
+### `event_staffing`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | UUID |
+| event_id | TEXT FK | |
+| staff_id | TEXT FK | |
+| role | TEXT NOT NULL | |
+| confirmed | INTEGER | 0/1 |
+
+### `availability_requests`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | |
+| event_id | TEXT FK | |
+| phone | TEXT NOT NULL | |
+| sent_at | TEXT NOT NULL | |
+| responded | INTEGER | 0/1 |
+| response | TEXT | |
+
+### `timesheet_entries`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | |
+| staff_id | TEXT FK | |
+| event_id | TEXT FK | Optional |
+| clock_in | TEXT | ISO timestamp |
+| clock_out | TEXT | |
+| break_start | TEXT | |
+| break_end | TEXT | |
+| break_compliant | INTEGER | 0/1 |
+| total_hours | REAL | |
+| notes | TEXT | |
+| recorded_at | TEXT NOT NULL | |
+
+### `tip_entries`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | |
+| staff_id | TEXT FK | |
+| event_id | TEXT FK | Optional |
+| amount | REAL NOT NULL | |
+| tip_type | TEXT | 'cash', 'card', 'pool' |
+| recorded_at | TEXT NOT NULL | |
+
+### `tipout_records`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | |
+| event_id | TEXT FK | |
+| total_tips | REAL NOT NULL | |
+| tipout_rate | REAL NOT NULL | |
+| tipout_amount | REAL NOT NULL | |
+| staff_count | INTEGER NOT NULL | |
+| calculated_at | TEXT NOT NULL | |
+
+### `incidents`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | |
+| staff_id | TEXT FK | |
+| event_id | TEXT FK | Optional |
+| description | TEXT NOT NULL | |
+| severity | TEXT | 'low', 'medium', 'high' |
+| resolved | INTEGER | 0/1 |
+| reported_at | TEXT NOT NULL | |
+
+### `venue_settings`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | Always 1 |
+| tip_pool_enabled | INTEGER | |
+| tipout_rate | REAL | |
+| manager_phone | TEXT | |
+| venue_address | TEXT | |
+| venue_phone | TEXT | |
+
+### `shift_swap_requests`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | |
+| staff_id | TEXT FK | |
+| event_id | TEXT FK | Optional |
+| reason | TEXT | |
+| status | TEXT | 'pending', 'approved', 'denied' |
+| created_at | TEXT NOT NULL | |
+
+### `performance_ratings`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | |
+| staff_id | TEXT FK | |
+| event_id | TEXT FK | Optional |
+| rating | INTEGER | 1–5 |
+| comment | TEXT | |
+| recorded_at | TEXT NOT NULL | |
+
+---
+
+## Routes
+
+### Public
+| Route | Description |
+|---|---|
+| `/` | Redirect to `/login` |
+| `/login` | Admin PIN login |
+| `/onboard/<token>` | Staff agreement signing |
+| `/onboard/<token>/thanks` | Post-signing confirmation |
+| `/faq` | Public FAQ page |
+| `/faq/search` | FAQ search |
+
+### Admin (authenticated)
+| Route | Description |
+|---|---|
+| `/admin` | Dashboard |
+| `/admin/staff` | Staff roster + add new |
+| `/admin/staff/<id>` | Staff detail view |
+| `/admin/staff/<id>/agreement` | View signed agreement |
+| `/admin/staff/<id>/resend-link` | Resend onboarding SMS |
+| `/admin/faqs` | FAQ management |
+| `/admin/staffing` | Events + staffing matrix |
+| `/admin/staffing/<event_id>` | Assign staff to event |
+| `/admin/staffing/<event_id>/broadcast` | SMS broadcast to staff |
+| `/admin/events` | Event list + create |
+| `/admin/timesheets` | Clock in/out log |
+| `/admin/incidents` | Incident log |
+| `/admin/tips` | Tip entry + tipout calculator |
+| `/admin/payroll_export` | CSV payroll export |
+| `/admin/swaps` | Shift swap requests |
+| `/admin/ratings` | Performance ratings |
+| `/admin/settings` | Venue name, manager phone, tip pool |
+| `/admin/seed` | Seed demo staff (dev only) |
+| `/demo` | Populate full demo data |
+
+### Webhook
+| Route | Description |
+|---|---|
+| `/sms/webhook` | Twilio SMS intake |
+
+---
+
+## Twilio Setup
+
+**Phone:** +1 (XXX) XXX-XXXX  
+**Account SID:** ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+**Auth Token:** xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+**Webhook URL:** `https://venuehr.onrender.com/sms/webhook`  
+**A2P 10DLC Campaign:** Under review
+
+### Environment Variables (Render)
+| Variable | Value |
+|---|---|
+| `SECRET_KEY` | Your Flask session secret |
+| `TWILIO_ACCOUNT_SID` | ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx |
+| `TWILIO_AUTH_TOKEN` | xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx |
+| `TWILIO_PHONE_NUMBER` | +1XXXXXXXXXX |
+| `DISABLE_TWILIO_VALIDATION` | 1 (for local testing) |
+| `MAIL_USERNAME` | your@gmail.com |
+| `MAIL_PASSWORD` | your Gmail app password |
+
+**If Twilio is slow, alternatives:** Plivo, MessageBird, Bandwidth
+
+---
+
+## SMS Commands (Staff)
+
+| Command | Description |
+|---|---|
+| `CLOCK IN` | Start shift |
+| `CLOCK OUT` | End shift |
+| `BREAK` | Start break |
+| `BACK` | End break |
+| `SWAP <message>` | Request shift swap |
+| `RATE <1-5> <comment>` | Rate an event |
+| `AVAIL <event_id>` | Confirm availability |
+| `UNAVAIL <event_id>` | Decline availability |
+| `FAQ <keyword>` | Search FAQ |
+| `STATUS` | Current shift status |
+| `HELP` | List commands |
+
+---
+
+## Email (Gmail SMTP)
+
+- Uses `smtplib` stdlib (no Flask-Mail dependency)
+- Welcome email sent when staff added via `/admin/staff`
+- Contains onboarding link + SMS opt-in link
+- SMTP: smtp.gmail.com:587 (TLS)
+
+---
+
+## Key Features
+
+- **SMS Onboarding Bot** — Staff converse via SMS to sign agreement
+- **Digital Timesheets** — Clock in/out, breaks, total hours via SMS
+- **Staffing Matrix** — Gap detection, SMS broadcast to staff
+- **Shift Swap Requests** — Staff request, manager approves/denies
+- **Performance Ratings** — Rate staff 1–5 after events
+- **Incident Log** — Track staff incidents by severity
+- **Tip Reporting** — Cash/card tips, tipout calculator
+- **Payroll CSV Export** — Hours × rate for payroll processing
+- **FAQ Page** — Searchable, keyword-indexed
+- **Multi-role Staff** — Bartender, Server, Security, Caterer, Photographer, DJ
+- **Demo Mode** — `/demo` seeds 38 staff, 1 event, timesheets, tips, swaps, ratings, incidents
+
+---
+
+## File Structure
+
+```
+/home/team/shared/
+├── app.py                  # Flask app (all routes + db init)
+├── hraas.db               # SQLite database (gitignored)
+├── requirements.txt        # Python deps
+├── Procfile               # Render deployment
+├── .env                   # Environment variables (gitignored)
+├── seed_test_data.py      # Standalone demo data script
+├── ROADMAP.md             # Product roadmap
+├── SPEC.md                # Feature specification
+└── templates/             # HTML templates
+    ├── base.html
+    ├── login.html
+    ├── admin_dashboard.html
+    ├── admin_staff.html
+    ├── admin_staffing.html
+    ├── admin_events.html
+    ├── admin_timesheets.html
+    ├── admin_tips.html
+    ├── admin_incidents.html
+    ├── admin_swaps.html
+    ├── admin_ratings.html
+    ├── admin_settings.html
+    ├── staffing_detail.html
+    ├── agreement.html
+    ├── onboard.html
+    ├── onboard_thanks.html
+    ├── faq.html
+    └── admin_faqs.html
+```
