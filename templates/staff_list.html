@@ -64,6 +64,7 @@
             <tr>
                 <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Name</th>
                 <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Role</th>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
                 <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Hire Date</th>
                 <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
                 <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
@@ -77,6 +78,13 @@
                     <div class="text-sm text-gray-500">{{ s.email }}</div>
                 </td>
                 <td class="px-6 py-4 text-gray-700 capitalize">{{ s.role }}</td>
+                <td class="px-6 py-4">
+                    {% if s.employment_type == 'contractor' %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">Contractor</span>
+                    {% else %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">W-2</span>
+                    {% endif %}
+                </td>
                 <td class="px-6 py-4 text-gray-700">{{ s.hire_date or '—' }}</td>
                 <td class="px-6 py-4">
                     {% if s.agreement_status == 'signed' %}
