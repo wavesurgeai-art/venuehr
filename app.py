@@ -383,6 +383,10 @@ def staff_list():
 
         This link will take you to your Staff Uniform & Professional Conduct Agreement. After signing, you'll receive SMS instructions to complete the remaining steps.
 
+        📱 SMS Opt-In:
+        Before you receive shift texts, please confirm your SMS consent here:
+        https://wavesurgeai.com/sms-opt-in
+
         If you have any questions, please contact your manager.
 
         See you soon!
@@ -1888,6 +1892,13 @@ def save_onboarding_state(phone: str, step: str, data: dict):
              (phone, step, json.dumps(merged), dob, assigned_role, datetime.utcnow().isoformat()))
     conn.commit()
     conn.close()
+
+# ─── Public Pages ─────────────────────────────────────────────────────────────
+
+@app.route('/roadmap')
+def roadmap():
+    """Serve the project roadmap."""
+    return send_from_directory('/home/team/shared', 'ROADMAP.html')
 
 def find_best_faq_answer(query: str) -> str:
     """Search FAQ database for best matching answer."""
