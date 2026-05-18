@@ -7,11 +7,26 @@
     <a href="{{ url_for('staff_list') }}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Staff</a>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+{# Success flash #}
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+{% for category, message in messages %}
+<div class="mb-4 px-4 py-3 rounded-lg {% if category == 'success' %}bg-emerald-50 text-emerald-800 border border-emerald-200{% else %}bg-red-50 text-red-800 border border-red-200{% endif %}">{{ message }}</div>
+{% endfor %}
+{% endif %}
+{% endwith %}
+
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 mb-6">
     <div class="flex justify-between items-start mb-6">
         <div>
             <h1 class="text-2xl font-bold text-gray-900">{{ staff.name }}</h1>
-            <p class="text-gray-500 capitalize">{{ staff.role }}</p>
+            <p class="text-gray-500 capitalize">{{ staff.role }}
+                {% if staff.employment_type == 'contractor' %}
+                <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">Contractor</span>
+                {% else %}
+                <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">W-2</span>
+                {% endif %}
+            </p>
         </div>
         <div>
             {% if staff.agreement_status == 'signed' %}
@@ -24,7 +39,7 @@
         </div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         <div>
             <h3 class="text-sm font-medium text-gray-500 mb-2">Contact Information</h3>
             <div class="space-y-2">
@@ -37,7 +52,7 @@
             <div class="space-y-2">
                 <p><span class="text-gray-700">Role:</span> {{ staff.role }}</p>
                 <p><span class="text-gray-700">Hire Date:</span> {{ staff.hire_date or '—' }}</p>
-                <p><span class="text-gray-700">Added:</span> {{ staff.created_at[:10] }}</p>
+                <p><span class="text-gray-700">Employment:</span> {{ staff.employment_type|upper }}</p>
             </div>
         </div>
     </div>
@@ -52,5 +67,91 @@
         <a href="{{ url_for('view_agreement', staff_id=staff.id) }}" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">View Signed Agreement</a>
         {% endif %}
     </div>
+</div>
+
+{# Profile Section #}
+<div class="bg-white rounded-xl shadow-sm border border-gray-200">
+    <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+        <h2 class="text-lg font-semibold text-gray-900">📋 Staff Profile</h2>
+        <span class="text-xs text-gray-400">Last updated: {{ profile.updated_at[:16] if profile else 'Never' }}</span>
+    </div>
+    <form method="POST" class="p-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            {# Emergency Contact #}
+            <div class="md:col-span-2">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">🚨 Emergency Contact</h3>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Contact Name</label>
+                <input type="text" name="emergency_contact_name" value="{{ profile.emergency_contact_name or '' }}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Phone</label>
+                <input type="tel" name="emergency_contact_phone" value="{{ profile.emergency_contact_phone or '' }}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Relationship</label>
+                <input type="text" name="emergency_contact_relationship" value="{{ profile.emergency_contact_relationship or '' }}" placeholder="e.g. Spouse, Parent" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+
+            {# Bank / Payment Info #}
+            <div class="md:col-span-2 mt-4">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">🏦 Payment / Banking</h3>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Bank Name</label>
+                <input type="text" name="bank_name" value="{{ profile.bank_name or '' }}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Routing Number</label>
+                <input type="text" name="bank_routing" value="{{ profile.bank_routing or '' }}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+            <div class="md:col-span-2">
+                <label class="block text-xs font-medium text-gray-500 mb-1">Account Number</label>
+                <input type="text" name="bank_account" value="{{ profile.bank_account or '' }}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+
+            {# Licenses / Certifications #}
+            <div class="md:col-span-2 mt-4">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">🪪 Licenses & Certifications</h3>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">License Type</label>
+                <input type="text" name="license_type" value="{{ profile.license_type or '' }}" placeholder="e.g. Food Handler, TIPS, Serving" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">License Number</label>
+                <input type="text" name="license_number" value="{{ profile.license_number or '' }}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">State</label>
+                <input type="text" name="license_state" value="{{ profile.license_state or '' }}" placeholder="e.g. IN" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Expires</label>
+                <input type="date" name="license_expires" value="{{ profile.license_expires or '' }}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+
+            {# Tax #}
+            <div class="md:col-span-2 mt-4">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">📄 Tax Withholding</h3>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">W-4 / Withholding Preference</label>
+                <input type="text" name="tax_withholding" value="{{ profile.tax_withholding or '' }}" placeholder="e.g. Single, 0 allowances" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+
+            {# Notes #}
+            <div class="md:col-span-2">
+                <label class="block text-xs font-medium text-gray-500 mb-1">Notes</label>
+                <textarea name="notes" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">{{ profile.notes or '' }}</textarea>
+            </div>
+        </div>
+
+        <div class="mt-6 flex gap-3">
+            <button type="submit" class="bg-rose-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">Save Profile</button>
+        </div>
+    </form>
 </div>
 {% endblock %}

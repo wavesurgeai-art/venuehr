@@ -254,6 +254,23 @@ def init_db():
         recorded_at TEXT NOT NULL,
         FOREIGN KEY (staff_id) REFERENCES staff(id)
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS staff_profiles (
+        staff_id TEXT PRIMARY KEY,
+        emergency_contact_name TEXT,
+        emergency_contact_phone TEXT,
+        emergency_contact_relationship TEXT,
+        bank_name TEXT,
+        bank_routing TEXT,
+        bank_account TEXT,
+        license_type TEXT,
+        license_number TEXT,
+        license_state TEXT,
+        license_expires TEXT,
+        tax_withholding TEXT,
+        notes TEXT,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+    )''')
     # Seed default venue config
     c.execute('INSERT OR IGNORE INTO venue_config (id, venue_name) VALUES (1, ?)', ('Our Venue',))
     c.execute('INSERT OR IGNORE INTO venue_settings (id, tip_pool_enabled, tipout_rate) VALUES (1, 0, 20.0)')
@@ -412,11 +429,48 @@ def staff_detail(staff_id):
     c = conn.cursor()
     c.execute('SELECT * FROM staff WHERE id = ?', (staff_id,))
     staff_member = c.fetchone()
-    conn.close()
     if not staff_member:
+        conn.close()
         flash('Staff member not found.', 'error')
         return redirect(url_for('staff_list'))
-    return render_template('staff_detail.html', staff=staff_member, admin_name=session.get('admin_name'))
+
+    # Load profile if exists
+    c.execute('SELECT * FROM staff_profiles WHERE staff_id = ?', (staff_id,))
+    profile = c.fetchone()
+
+    if request.method == 'POST':
+        emergency_name = request.form.get('emergency_contact_name', '')
+        emergency_phone = request.form.get('emergency_contact_phone', '')
+        emergency_rel = request.form.get('emergency_contact_relationship', '')
+        bank_name = request.form.get('bank_name', '')
+        bank_routing = request.form.get('bank_routing', '')
+        bank_account = request.form.get('bank_account', '')
+        license_type = request.form.get('license_type', '')
+        license_number = request.form.get('license_number', '')
+        license_state = request.form.get('license_state', '')
+        license_expires = request.form.get('license_expires', '')
+        tax_withholding = request.form.get('tax_withholding', '')
+        notes = request.form.get('notes', '')
+        now = datetime.utcnow().isoformat()
+        c.execute('''INSERT OR REPLACE INTO staff_profiles
+                     (staff_id, emergency_contact_name, emergency_contact_phone,
+                      emergency_contact_relationship, bank_name, bank_routing, bank_account,
+                      license_type, license_number, license_state, license_expires,
+                      tax_withholding, notes, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (staff_id, emergency_name, emergency_phone, emergency_rel,
+                   bank_name, bank_routing, bank_account,
+                   license_type, license_number, license_state, license_expires,
+                   tax_withholding, notes, now))
+        conn.commit()
+        flash('Profile saved.', 'success')
+        # Reload profile
+        c.execute('SELECT * FROM staff_profiles WHERE staff_id = ?', (staff_id,))
+        profile = c.fetchone()
+
+    conn.close()
+    return render_template('staff_detail.html', staff=staff_member, profile=profile,
+                          admin_name=session.get('admin_name'))
 
 @app.route('/admin/staff/<staff_id>/agreement')
 @login_required
