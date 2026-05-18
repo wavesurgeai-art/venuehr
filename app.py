@@ -120,6 +120,7 @@ def init_db():
         email TEXT NOT NULL,
         phone TEXT,
         role TEXT NOT NULL,
+        employment_type TEXT DEFAULT 'w2',
         hire_date TEXT,
         onboarding_token TEXT UNIQUE,
         agreement_status TEXT DEFAULT 'pending',
@@ -170,6 +171,8 @@ def init_db():
         staff_id TEXT NOT NULL,
         role TEXT NOT NULL,
         confirmed INTEGER NOT NULL DEFAULT 0,
+        pay_type TEXT DEFAULT 'hourly',
+        rate REAL DEFAULT 0.0,
         FOREIGN KEY (event_id) REFERENCES events(id),
         FOREIGN KEY (staff_id) REFERENCES staff(id)
     )''')
@@ -367,9 +370,10 @@ def staff_list():
         role = request.form.get('role')
         hire_date = request.form.get('hire_date', '')
         now = datetime.utcnow().isoformat()
-        c.execute('''INSERT INTO staff (id, venue_id, name, email, phone, role, hire_date, onboarding_token, agreement_status, created_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)''',
-                  (staff_id, 'default', name, email, phone, role, hire_date, token, now))
+        employment_type = request.form.get('employment_type', 'w2')
+        c.execute('''INSERT INTO staff (id, venue_id, name, email, phone, role, employment_type, hire_date, onboarding_token, agreement_status, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)''',
+                  (staff_id, 'default', name, email, phone, role, employment_type, hire_date, token, now))
         conn.commit()
         onboarding_link = f'{request.host_url}onboard/{token}'
         venue_name = get_venue_name()
