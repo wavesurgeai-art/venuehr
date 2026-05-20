@@ -1956,7 +1956,9 @@ def save_onboarding_state(phone: str, step: str, data: dict):
 @app.route('/roadmap')
 def roadmap():
     """Serve the project roadmap."""
-    return send_from_directory('/home/team/shared', 'ROADMAP.html')
+    with open(os.path.join(app.root_path, 'ROADMAP.md'), 'r') as f:
+        content = f.read()
+    return make_response(content, 200, {'Content-Type': 'text/markdown'})
 
 def find_best_faq_answer(query: str) -> str:
     """Search FAQ database for best matching answer."""
