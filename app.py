@@ -29,13 +29,20 @@ MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
 MAIL_FROM = os.environ.get('MAIL_USERNAME', 'wavesurgeai@gmail.com')
 
 def send_email(to, subject, body):
-    """Send an email via Gmail SMTP using stdlib smtplib."""
+    """Send an email via Zoho or Gmail SMTP using stdlib smtplib."""
     import smtplib
     if not MAIL_USERNAME or not MAIL_PASSWORD:
         app.logger.warning('Email not configured — set MAIL_USERNAME and MAIL_PASSWORD env vars')
         return False
+    # Determine SMTP server based on email domain
+    if 'zoho.com' in MAIL_USERNAME.lower():
+        smtp_server = 'smtp.zoho.com'
+        smtp_port = 587
+    else:
+        smtp_server = 'smtp.gmail.com'
+        smtp_port = 587
     try:
-        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.ehlo()
             server.starttls()
             server.ehlo()
