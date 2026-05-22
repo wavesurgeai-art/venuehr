@@ -29,20 +29,19 @@ MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
 MAIL_FROM = os.environ.get('MAIL_USERNAME', 'wavesurgeai@gmail.com')
 
 def send_email(to, subject, body):
-    """Send an email via Zoho or Gmail SMTP using stdlib smtplib."""
-    import smtplib
+    """Send an email via Zoho or Gmail SMTP using stdlib smtplib. Falls back to port 465 (SSL) on 587 failure."""
+    import smtplib, socket
     if not MAIL_USERNAME or not MAIL_PASSWORD:
         app.logger.warning('Email not configured — set MAIL_USERNAME and MAIL_PASSWORD env vars')
         return False
     # Determine SMTP server based on email domain
     if 'zoho.com' in MAIL_USERNAME.lower():
         smtp_server = 'smtp.zoho.com'
-        smtp_port = 587
     else:
         smtp_server = 'smtp.gmail.com'
-        smtp_port = 587
     try:
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
+        # Try port 587 (TLS) first
+        with smtplib.SMTP(smtp_server, 587) as server:
             server.ehlo()
             server.starttls()
             server.ehlo()
@@ -51,6 +50,23 @@ def send_email(to, subject, body):
             server.sendmail(MAIL_FROM, to, msg)
         app.logger.info(f'Email sent to {to}: {subject}')
         return True
+    except (socket.error, OSError) as e:
+        # Port 587 blocked — fall back to port 465 (SSL)
+        if 'zoho.com' in MAIL_USERNAME.lower():
+            app.logger.warning(f'Port 587 failed ({e}), trying port 465 (SSL)...')
+            try:
+                with smtplib.SMTP_SSL(smtp_server, 465) as server:
+                    server.login(MAIL_USERNAME, MAIL_PASSWORD)
+                    msg = f'From: {MAIL_FROM}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}'
+                    server.sendmail(MAIL_FROM, to, msg)
+                app.logger.info(f'Email sent to {to} via port 465: {subject}')
+                return True
+            except Exception as e2:
+                app.logger.error(f'Email failed to {to} (port 465 also failed): {e2}')
+                return False
+        else:
+            app.logger.error(f'Email failed to {to}: {e}')
+            return False
     except Exception as e:
         app.logger.error(f'Email failed to {to}: {e}')
         return False
