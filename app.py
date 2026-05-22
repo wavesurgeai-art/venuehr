@@ -38,7 +38,7 @@ def send_email(to, subject, body):
 
     # Try port 587 (TLS) first
     try:
-        import ssl
+        import smtplib, ssl
         context = ssl.create_default_context()
         with smtplib.SMTP(smtp_server, 587, context=context, timeout=20) as server:
             server.ehlo()
@@ -54,7 +54,7 @@ def send_email(to, subject, body):
 
     # Fall back to port 465 (SSL)
     try:
-        import ssl
+        import smtplib, ssl
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(smtp_server, 465, context=context, timeout=20) as server:
             server.login(MAIL_USERNAME, MAIL_PASSWORD)
