@@ -36,23 +36,7 @@ def send_email(to, subject, body):
 
     smtp_server = 'smtp.zoho.com'
 
-    # Try port 587 (TLS) first
-    try:
-        import smtplib, ssl
-        context = ssl.create_default_context()
-        with smtplib.SMTP(smtp_server, 587, context=context, timeout=20) as server:
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-            server.login(MAIL_USERNAME, MAIL_PASSWORD)
-            msg = f'From: {MAIL_FROM}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}'
-            server.sendmail(MAIL_FROM, to, msg)
-        app.logger.info(f'Email sent to {to}: {subject}')
-        return True
-    except Exception as e:
-        app.logger.warning(f'Port 587 failed ({e}), trying port 465 (SSL)...')
-
-    # Fall back to port 465 (SSL)
+    # Try port 465 (SSL) first — confirmed working from sandbox
     try:
         import smtplib, ssl
         context = ssl.create_default_context()
@@ -62,8 +46,27 @@ def send_email(to, subject, body):
             server.sendmail(MAIL_FROM, to, msg)
         app.logger.info(f'Email sent to {to} via port 465: {subject}')
         return True
+    except Exception as e:
+        app.logger.warning(f'Port 465 SSL failed ({e}), trying port 587 (TLS)...')
+
+    # Fall back to port 587 (TLS)
+    try:
+        import smtplib, ssl
+        context = ssl.create_default_context()
+        server = smtplib.SMTP(smtp_server, 587, timeout=20)
+        try:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            server.login(MAIL_USERNAME, MAIL_PASSWORD)
+            msg = f'From: {MAIL_FROM}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}'
+            server.sendmail(MAIL_FROM, to, msg)
+        finally:
+            server.quit()
+        app.logger.info(f'Email sent to {to}: {subject}')
+        return True
     except Exception as e2:
-        app.logger.error(f'Email failed to {to} (port 465 also failed): {e2}')
+        app.logger.error(f'Email failed to {to} (port 587 also failed): {e2}')
         return False
 
 # Ensure upload directory exists
