@@ -29,44 +29,44 @@ MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
 MAIL_FROM = os.environ.get('MAIL_USERNAME', 'wavesurgeai@gmail.com')
 
 def send_email(to, subject, body):
-    """Send email via Zoho SMTP — try port 587 (TLS), fallback to port 465 (SSL)."""
-    if not MAIL_USERNAME or not MAIL_PASSWORD:
-        app.logger.warning('Email not configured — set MAIL_USERNAME and MAIL_PASSWORD env vars')
+    """Send email via Resend API (HTTPS) — works on Render (port 443 only)."""
+    import urllib.request, json
+
+    resend_api_key = os.environ.get('RESEND_API_KEY', '')
+    if not resend_api_key:
+        app.logger.warning('RESEND_API_KEY env var not set')
         return False
 
-    smtp_server = 'smtp.zoho.com'
+    # From address — must be a verified domain in Resend, or a free sandbox address
+    from_address = os.environ.get('RESEND_FROM_EMAIL', 'VenueHR <onboarding@resend.dev>')
 
-    # Try port 465 (SSL) first — confirmed working from sandbox
+    payload = json.dumps({
+        'from': from_address,
+        'to': [to],
+        'subject': subject,
+        'text': body
+    }).encode('utf-8')
+
+    req = urllib.request.Request(
+        'https://api.resend.com/emails',
+        data=payload,
+        headers={
+            'Authorization': f'Bearer {resend_api_key}',
+            'Content-Type': 'application/json'
+        },
+        method='POST'
+    )
+
     try:
-        import smtplib, ssl
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(smtp_server, 465, context=context, timeout=20) as server:
-            server.login(MAIL_USERNAME, MAIL_PASSWORD)
-            msg = f'From: {MAIL_FROM}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}'
-            server.sendmail(MAIL_FROM, to, msg)
-        app.logger.info(f'Email sent to {to} via port 465: {subject}')
-        return True
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            app.logger.info(f'Email sent to {to}: {subject} (Resend)')
+            return True
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()[:200]
+        app.logger.error(f'Resend API error for {to}: HTTP {e.code} — {error_body}')
+        return False
     except Exception as e:
-        app.logger.warning(f'Port 465 SSL failed ({e}), trying port 587 (TLS)...')
-
-    # Fall back to port 587 (TLS)
-    try:
-        import smtplib, ssl
-        context = ssl.create_default_context()
-        server = smtplib.SMTP(smtp_server, 587, timeout=20)
-        try:
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-            server.login(MAIL_USERNAME, MAIL_PASSWORD)
-            msg = f'From: {MAIL_FROM}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}'
-            server.sendmail(MAIL_FROM, to, msg)
-        finally:
-            server.quit()
-        app.logger.info(f'Email sent to {to}: {subject}')
-        return True
-    except Exception as e2:
-        app.logger.error(f'Email failed to {to} (port 587 also failed): {e2}')
+        app.logger.error(f'Resend failed for {to}: {e}')
         return False
 
 # Ensure upload directory exists
