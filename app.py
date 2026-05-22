@@ -23,64 +23,48 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-producti
 app.config['UPLOAD_FOLDER'] = '/home/team/shared/static/uploads'
 app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # 2MB max
 
-# ─── Email (Zoho Mail API via HTTPS) ───────────────────────────────────────────
+# ─── Email (Zoho SMTP) ───────────────────────────────────────────────────────────
 MAIL_USERNAME = os.environ.get('MAIL_USERNAME', '')
 MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
 MAIL_FROM = os.environ.get('MAIL_USERNAME', 'wavesurgeai@gmail.com')
 
 def send_email(to, subject, body):
-    """Send email via Zoho Mail API (HTTPS) — bypasses SMTP port restrictions on Render."""
+    """Send email via Zoho SMTP — try port 587 (TLS), fallback to port 465 (SSL)."""
     if not MAIL_USERNAME or not MAIL_PASSWORD:
         app.logger.warning('Email not configured — set MAIL_USERNAME and MAIL_PASSWORD env vars')
         return False
 
-    if 'zoho.com' in MAIL_USERNAME.lower():
-        # Zoho Mail API — uses HTTPS (port 443), never blocked by cloud platforms
-        try:
-            import base64, urllib.request, json
-            credentials = f"{MAIL_USERNAME}:{MAIL_PASSWORD}".encode('ascii')
-            auth_header = 'Basic ' + base64.b64encode(credentials).decode('ascii')
+    smtp_server = 'smtp.zoho.com'
 
-            payload = json.dumps({
-                'from': MAIL_USERNAME,
-                'to': to,
-                'subject': subject,
-                'body': body,
-                'type': 'text/plain'
-            }).encode('utf-8')
+    # Try port 587 (TLS) first
+    try:
+        import ssl
+        context = ssl.create_default_context()
+        with smtplib.SMTP(smtp_server, 587, context=context, timeout=20) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            server.login(MAIL_USERNAME, MAIL_PASSWORD)
+            msg = f'From: {MAIL_FROM}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}'
+            server.sendmail(MAIL_FROM, to, msg)
+        app.logger.info(f'Email sent to {to}: {subject}')
+        return True
+    except Exception as e:
+        app.logger.warning(f'Port 587 failed ({e}), trying port 465 (SSL)...')
 
-            req = urllib.request.Request(
-                'https://mail.zoho.com/api/accounts/mail.compose',
-                data=payload,
-                headers={
-                    'Authorization': auth_header,
-                    'Content-Type': 'application/json'
-                },
-                method='POST'
-            )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                resp_body = resp.read().decode('utf-8')
-            app.logger.info(f'Email sent to {to} via Zoho API: {subject}')
-            return True
-        except Exception as e:
-            app.logger.error(f'Email failed to {to} (Zoho API): {e}')
-            return False
-    else:
-        # Gmail fallback — rarely works on cloud platforms, keep for dev
-        try:
-            import smtplib
-            with smtplib.SMTP('smtp.gmail.com', 587) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(MAIL_USERNAME, MAIL_PASSWORD)
-                msg = f'From: {MAIL_FROM}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}'
-                server.sendmail(MAIL_FROM, to, msg)
-            app.logger.info(f'Email sent to {to}: {subject}')
-            return True
-        except Exception as e:
-            app.logger.error(f'Email failed to {to}: {e}')
-            return False
+    # Fall back to port 465 (SSL)
+    try:
+        import ssl
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(smtp_server, 465, context=context, timeout=20) as server:
+            server.login(MAIL_USERNAME, MAIL_PASSWORD)
+            msg = f'From: {MAIL_FROM}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}'
+            server.sendmail(MAIL_FROM, to, msg)
+        app.logger.info(f'Email sent to {to} via port 465: {subject}')
+        return True
+    except Exception as e2:
+        app.logger.error(f'Email failed to {to} (port 465 also failed): {e2}')
+        return False
 
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
