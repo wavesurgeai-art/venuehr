@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Rating QR — {{ event.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .qr-box svg { width: 280px; height: 280px; }
+    @media print {
+        nav, .no-print { display: none !important; }
+        body { background: #fff; }
+        .print-card { box-shadow: none !important; border: none !important; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto">
+    <div class="no-print mb-6 flex justify-between items-center">
+        <a href="{{ url_for('events_list') }}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Events</a>
+        <button onclick="window.print()" class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">🖨 Print</button>
+    </div>
+
+    <div class="print-card bg-white rounded-xl shadow-sm p-10 border border-gray-200 text-center">
+        <h1 class="text-3xl font-bold text-gray-900">How did we do?</h1>
+        <p class="text-gray-500 mt-2 mb-6">Scan to rate the team at<br><strong class="text-gray-700">{{ event.name }}</strong> · {{ event.date }}</p>
+        <div class="qr-box flex justify-center mb-6">{{ qr_svg|safe }}</div>
+        <p class="text-sm text-gray-400 break-all">{{ rate_url }}</p>
+        <p class="text-xs text-gray-400 mt-4">Point your phone camera at the code — your feedback is anonymous.</p>
+    </div>
+</div>
+{% endblock %}
