@@ -1366,6 +1366,75 @@ def admin_ratings():
                           total_ratings=total_ratings, overall_avg=overall_avg,
                           admin_name=session.get('admin_name'))
 
+
+@app.route('/rate/<event_id>', methods=['GET', 'POST'])
+def rate_event(event_id):
+    """Public, anonymous guest rating page for an event's staff (reached via QR)."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM events WHERE id = ?', (event_id,))
+    event = c.fetchone()
+    if not event:
+        conn.close()
+        return "This rating link is not available.", 404
+    c.execute('''SELECT DISTINCT s.id, s.name, s.role
+                 FROM event_staffing es JOIN staff s ON es.staff_id = s.id
+                 WHERE es.event_id = ? AND es.confirmed = 1
+                 ORDER BY s.role, s.name''', (event_id,))
+    staff = c.fetchall()
+    if request.method == 'POST':
+        now = datetime.utcnow().isoformat()
+        for member in staff:
+            raw = request.form.get(f'rating_{member["id"]}', '')
+            if raw.isdigit() and 1 <= int(raw) <= 5:
+                comment = (request.form.get(f'comment_{member["id"]}') or '').strip()[:500]
+                c.execute('''INSERT INTO performance_ratings (id, staff_id, event_id, rating, comment, recorded_at)
+                             VALUES (?, ?, ?, ?, ?, ?)''',
+                          (str(uuid.uuid4()), member['id'], event_id, int(raw), comment, now))
+        conn.commit()
+        conn.close()
+        return redirect(url_for('rate_event_thanks', event_id=event_id))
+    conn.close()
+    return render_template('rate_event.html', event=event, staff=staff)
+
+
+@app.route('/rate/<event_id>/thanks')
+def rate_event_thanks(event_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM events WHERE id = ?', (event_id,))
+    event = c.fetchone()
+    conn.close()
+    return render_template('rate_event_thanks.html', event=event)
+
+
+@app.route('/admin/events/<event_id>/qr')
+@login_required
+def event_qr(event_id):
+    """Printable QR code linking guests to the anonymous rating page for an event."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM events WHERE id = ?', (event_id,))
+    event = c.fetchone()
+    conn.close()
+    if not event:
+        flash('Event not found.', 'error')
+        return redirect(url_for('events_list'))
+    rate_url = url_for('rate_event', event_id=event_id, _external=True)
+    import qrcode
+    import qrcode.image.svg
+    import io as _io
+    qr = qrcode.QRCode(box_size=14, border=2)
+    qr.add_data(rate_url)
+    qr.make(fit=True)
+    img = qr.make_image(image_factory=qrcode.image.svg.SvgPathImage)
+    buf = _io.BytesIO()
+    img.save(buf)
+    qr_svg = buf.getvalue().decode('utf-8')
+    if qr_svg.startswith('<?xml'):
+        qr_svg = qr_svg.split('?>', 1)[1].lstrip()
+    return render_template('event_qr.html', event=event, rate_url=rate_url, qr_svg=qr_svg)
+
 @app.route('/admin/seed', methods=['GET'])
 @login_required
 def seed_data():
