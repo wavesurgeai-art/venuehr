@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}Onboarding — {{ step.title }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .sig-canvas { border: 2px dashed #d1d5db; border-radius: 8px; cursor: crosshair; background: #fff; }
+    .sig-canvas.signed { border-color: #10b981; }
+    .doc-body { max-height: 380px; overflow-y: auto; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+
+    <!-- Progress -->
+    {% set pct = ((step_number - 1) / total_steps * 100) | round | int %}
+    <div class="mb-6">
+        <div class="flex justify-between text-sm text-gray-500 mb-2">
+            <span class="font-medium text-gray-700">Step {{ step_number }} of {{ total_steps }}</span>
+            <span>{{ pct }}% complete</span>
+        </div>
+        <div class="w-full bg-gray-200 rounded-full h-2">
+            <div class="bg-rose-600 h-2 rounded-full transition-all" style="width: {{ pct }}%"></div>
+        </div>
+    </div>
+
+    <div class="text-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">{{ step.title }}</h1>
+        <p class="text-gray-500 mt-1">{{ step.subtitle }}</p>
+    </div>
+
+    <!-- Document body -->
+    <div class="bg-white rounded-xl shadow-sm p-8 border border-gray-200 mb-6">
+        <div class="doc-body prose prose-sm max-w-none text-gray-700 whitespace-pre-line">{{ step.body }}</div>
+    </div>
+
+    <!-- Form -->
+    <form method="POST" id="stepForm" class="bg-white rounded-xl shadow-sm p-8 border border-gray-200">
+        <input type="hidden" name="step_key" value="{{ step.key }}">
+
+        {% if step.fields %}
+        <div class="grid sm:grid-cols-2 gap-4 mb-6">
+            {% for f in step.fields %}
+            <div class="{% if f.type == 'checkbox' %}sm:col-span-2{% endif %}">
+                {% if f.type == 'checkbox' %}
+                    <label class="flex items-start gap-3 text-sm text-gray-700">
+                        <input type="checkbox" name="{{ f.name }}" class="mt-0.5 h-4 w-4 text-rose-600 border-gray-300 rounded focus:ring-rose-500">
+                        <span>{{ f.label }}</span>
+                    </label>
+                {% elif f.type == 'select' %}
+                    <label class="block text-sm font-medium text-gray-700 mb-1">{{ f.label }}{% if f.required %} <span class="text-rose-600">*</span>{% endif %}</label>
+                    <select name="{{ f.name }}" {% if f.required %}required{% endif %}
+                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-rose-500 focus:border-rose-500">
+                        <option value="">Select…</option>
+                        {% for opt in f.options %}<option value="{{ opt }}">{{ opt }}</option>{% endfor %}
+                    </select>
+                {% else %}
+                    <label class="block text-sm font-medium text-gray-700 mb-1">{{ f.label }}{% if f.required %} <span class="text-rose-600">*</span>{% endif %}</label>
+                    <input type="{{ f.type }}" name="{{ f.name }}" {% if f.required %}required{% endif %}
+                           placeholder="{{ f.placeholder or '' }}"
+                           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-rose-500 focus:border-rose-500">
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if step.signature %}
+        <h2 class="text-lg font-semibold text-gray-900 mb-2">Your Signature</h2>
+        <p class="text-sm text-gray-500 mb-3">Draw your signature in the box using your mouse or touchscreen.</p>
+        <div class="flex gap-3 mb-3">
+            <button type="button" id="clearBtn" class="text-sm text-gray-600 hover:text-gray-800 border border-gray-300 px-3 py-1 rounded">Clear</button>
+            <button type="button" id="undoBtn" class="text-sm text-gray-600 hover:text-gray-800 border border-gray-300 px-3 py-1 rounded">Undo</button>
+        </div>
+        <canvas id="sigCanvas" class="sig-canvas w-full h-40"></canvas>
+        <input type="hidden" name="signature_data" id="signature_data">
+        {% endif %}
+
+        <div class="flex items-start gap-3 mt-6 mb-6">
+            <input type="checkbox" id="acknowledge" required class="mt-1 h-4 w-4 text-rose-600 border-gray-300 rounded focus:ring-rose-500">
+            <label for="acknowledge" class="text-sm text-gray-700">{{ step.ack }}</label>
+        </div>
+
+        <button type="submit" id="submitBtn" disabled
+                class="w-full bg-rose-600 text-white py-3 rounded-lg font-medium hover:bg-rose-700 transition disabled:bg-gray-300 disabled:cursor-not-allowed">
+            {% if step_number == total_steps %}Finish Onboarding ✓{% else %}Continue →{% endif %}
+        </button>
+
+        <div class="mt-6 pt-4 border-t border-gray-200 text-center text-xs text-gray-400">
+            By continuing, you agree to our
+            <a href="https://wavesurgeai.com/terms-of-service" target="_blank" class="underline hover:text-gray-600">Terms of Service</a>
+            and
+            <a href="https://wavesurgeai.com/privacy-policy" target="_blank" class="underline hover:text-gray-600">Privacy Policy</a>.
+        </div>
+    </form>
+</div>
+
+<script>
+(function() {
+    const ackCheck = document.getElementById('acknowledge');
+    const submitBtn = document.getElementById('submitBtn');
+    const canvas = document.getElementById('sigCanvas');
+    const sigInput = document.getElementById('signature_data');
+    let paths = [], currentPath = [], drawing = false, ctx = null;
+
+    function updateSubmit() {
+        let ok = ackCheck.checked;
+        if (canvas && paths.length === 0) ok = false;
+        submitBtn.disabled = !ok;
+    }
+    ackCheck.addEventListener('change', updateSubmit);
+
+    if (canvas) {
+        ctx = canvas.getContext('2d');
+        function style() { ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; }
+        function resize() {
+            const r = canvas.getBoundingClientRect();
+            canvas.width = r.width; canvas.height = r.height; style(); redraw();
+        }
+        function getPos(e) {
+            const r = canvas.getBoundingClientRect();
+            const x = e.touches ? e.touches[0].clientX : e.clientX;
+            const y = e.touches ? e.touches[0].clientY : e.clientY;
+            return { x: x - r.left, y: y - r.top };
+        }
+        function start(e) { e.preventDefault(); drawing = true; currentPath = [getPos(e)]; }
+        function move(e) {
+            if (!drawing) return; e.preventDefault();
+            const p = getPos(e); currentPath.push(p);
+            ctx.beginPath();
+            ctx.moveTo(currentPath[currentPath.length - 2].x, currentPath[currentPath.length - 2].y);
+            ctx.lineTo(p.x, p.y); ctx.stroke();
+        }
+        function end() {
+            if (!drawing) return; drawing = false;
+            if (currentPath.length) { paths.push([...currentPath]); currentPath = []; canvas.classList.add('signed'); updateSubmit(); }
+        }
+        function redraw() {
+            if (!ctx) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            paths.forEach(p => {
+                if (p.length < 2) return;
+                ctx.beginPath(); ctx.moveTo(p[0].x, p[0].y);
+                for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
+                ctx.stroke();
+            });
+        }
+        canvas.addEventListener('mousedown', start);
+        canvas.addEventListener('mousemove', move);
+        canvas.addEventListener('mouseup', end);
+        canvas.addEventListener('mouseleave', end);
+        canvas.addEventListener('touchstart', start);
+        canvas.addEventListener('touchmove', move);
+        canvas.addEventListener('touchend', end);
+        document.getElementById('clearBtn').addEventListener('click', () => { paths = []; redraw(); canvas.classList.remove('signed'); sigInput.value = ''; updateSubmit(); });
+        document.getElementById('undoBtn').addEventListener('click', () => { if (paths.length) { paths.pop(); redraw(); if (!paths.length) canvas.classList.remove('signed'); updateSubmit(); } });
+        resize();
+        window.addEventListener('resize', resize);
+    }
+
+    document.getElementById('stepForm').addEventListener('submit', (e) => {
+        if (canvas) {
+            if (paths.length === 0) { e.preventDefault(); alert('Please provide your signature before continuing.'); return; }
+            sigInput.value = canvas.toDataURL('image/png');
+        }
+    });
+})();
+</script>
+{% endblock %}
