@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Rate Our Team — {{ event.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .star { font-size: 2rem; cursor: pointer; color: #d1d5db; transition: color .1s; line-height: 1; user-select: none; }
+    .star.filled { color: #f59e0b; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="text-center mb-8">
+        <h1 class="text-2xl font-bold text-gray-900">How was our team?</h1>
+        <p class="text-gray-500 mt-1">{{ event.name }} · {{ event.date }}</p>
+        <p class="text-sm text-gray-400 mt-2">Your feedback is anonymous. Tap the stars to rate anyone who helped make your event special.</p>
+    </div>
+
+    {% if staff %}
+    <form method="POST" id="rateForm" class="space-y-4">
+        {% for member in staff %}
+        <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-200">
+            <div class="flex justify-between items-center mb-3 gap-4">
+                <div>
+                    <div class="font-semibold text-gray-900">{{ member.name }}</div>
+                    <div class="text-xs text-gray-400 capitalize">{{ member.role }}</div>
+                </div>
+                <div class="stars shrink-0" data-target="rating_{{ member.id }}">
+                    {% for n in range(1, 6) %}<span class="star" data-val="{{ n }}">★</span>{% endfor %}
+                </div>
+            </div>
+            <input type="hidden" name="rating_{{ member.id }}" id="rating_{{ member.id }}" value="">
+            <input type="text" name="comment_{{ member.id }}" maxlength="500" placeholder="Optional comment…"
+                   class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-rose-500 focus:border-rose-500">
+        </div>
+        {% endfor %}
+
+        <button type="submit"
+                class="w-full bg-rose-600 text-white py-3 rounded-lg font-medium hover:bg-rose-700 transition">
+            Submit Ratings
+        </button>
+        <p class="text-center text-xs text-gray-400">Powered by VenueHR</p>
+    </form>
+    {% else %}
+    <div class="bg-white rounded-xl shadow-sm p-8 border border-gray-200 text-center text-gray-500">
+        Ratings aren't open for this event yet. Please check with the venue staff.
+    </div>
+    {% endif %}
+</div>
+
+<script>
+document.querySelectorAll('.stars').forEach(function (group) {
+    const target = document.getElementById(group.dataset.target);
+    const stars = group.querySelectorAll('.star');
+    function fill(val) { stars.forEach(function (s) { s.classList.toggle('filled', parseInt(s.dataset.val) <= val); }); }
+    stars.forEach(function (star) {
+        star.addEventListener('click', function () { target.value = star.dataset.val; fill(parseInt(star.dataset.val)); });
+        star.addEventListener('mouseenter', function () { fill(parseInt(star.dataset.val)); });
+    });
+    group.addEventListener('mouseleave', function () { fill(parseInt(target.value || 0)); });
+});
+</script>
+{% endblock %}
