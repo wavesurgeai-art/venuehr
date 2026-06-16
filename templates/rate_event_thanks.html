@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Thank You — VenueHR{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center">
+    <div class="text-center max-w-md bg-white rounded-xl shadow-lg p-10">
+        <div class="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg class="w-8 h-8 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+        </div>
+        <h1 class="text-2xl font-bold text-gray-900 mb-3">Thank you!</h1>
+        <p class="text-gray-600">Your feedback for {{ event.name if event else 'the event' }} has been received. We truly appreciate you taking a moment to recognize our team.</p>
+    </div>
+</div>
+{% endblock %}
