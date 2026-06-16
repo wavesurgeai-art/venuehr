@@ -24,7 +24,10 @@
     </div>
 
     <h3 class="text-sm font-medium text-gray-500 mb-3">Signature on File</h3>
-    {% if agreement.signature_image %}
+    {% if agreement.signature_image and agreement.signature_image.startswith('data:') %}
+    <img src="{{ agreement.signature_image }}"
+         alt="Staff Signature" class="border border-gray-200 rounded-lg max-w-md mb-6 bg-white">
+    {% elif agreement.signature_image %}
     <img src="{{ url_for('serve_signature', filename=agreement.signature_image) }}"
          alt="Staff Signature" class="border border-gray-200 rounded-lg max-w-md mb-6">
     {% else %}
