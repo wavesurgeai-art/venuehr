@@ -88,9 +88,15 @@
                     <span class="{% if doc.done %}text-gray-800{% else %}text-gray-400{% endif %}">{{ doc.title }}</span>
                 </span>
                 {% if doc.done and doc.signed_at %}
-                <span class="text-xs text-gray-400">Signed {{ doc.signed_at[:10] }}</span>
+                <span class="flex items-center gap-3">
+                    <span class="text-xs text-gray-400">Signed {{ doc.signed_at[:10] }}</span>
+                    {% if doc.viewable %}<a href="{{ url_for('view_onboarding_doc', staff_id=staff.id, doc_type=doc.key) }}" class="text-xs font-medium text-rose-600 hover:text-rose-700">View →</a>{% endif %}
+                </span>
                 {% elif doc.done %}
-                <span class="text-xs text-gray-400">Complete</span>
+                <span class="flex items-center gap-3">
+                    <span class="text-xs text-gray-400">Complete</span>
+                    {% if doc.viewable %}<a href="{{ url_for('view_onboarding_doc', staff_id=staff.id, doc_type=doc.key) }}" class="text-xs font-medium text-rose-600 hover:text-rose-700">View →</a>{% endif %}
+                </span>
                 {% else %}
                 <span class="text-xs text-amber-600">Pending</span>
                 {% endif %}
