@@ -69,6 +69,37 @@
     </div>
 </div>
 
+{# Onboarding Documents Status #}
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
+    <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+        <h2 class="text-lg font-semibold text-gray-900">📝 Onboarding Documents</h2>
+        {% if onboarding_complete %}
+        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Packet Complete</span>
+        {% else %}
+        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">In Progress</span>
+        {% endif %}
+    </div>
+    <div class="p-6">
+        <ul class="space-y-3">
+            {% for doc in onboarding_docs %}
+            <li class="flex items-center justify-between text-sm">
+                <span class="flex items-center gap-2">
+                    {% if doc.done %}<span class="text-emerald-600">✓</span>{% else %}<span class="text-gray-300">○</span>{% endif %}
+                    <span class="{% if doc.done %}text-gray-800{% else %}text-gray-400{% endif %}">{{ doc.title }}</span>
+                </span>
+                {% if doc.done and doc.signed_at %}
+                <span class="text-xs text-gray-400">Signed {{ doc.signed_at[:10] }}</span>
+                {% elif doc.done %}
+                <span class="text-xs text-gray-400">Complete</span>
+                {% else %}
+                <span class="text-xs text-amber-600">Pending</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+
 {# Profile Section #}
 <div class="bg-white rounded-xl shadow-sm border border-gray-200">
     <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
