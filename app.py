@@ -118,6 +118,158 @@ PRIVACY: Do not post photos or videos of the wedding party, their decor, or thei
 
 CONFIDENTIALITY: Respect the privacy of our clients. What you hear or see at a private event stays at the event."""
 
+
+# ─── Onboarding Document Texts ────────────────────────────────────────────────
+
+HANDBOOK_TEXT = """EMPLOYEE HANDBOOK ACKNOWLEDGMENT
+
+This Handbook summarizes the standards every team member is expected to uphold. Please review each section before acknowledging.
+
+1. UNIFORM & GROOMING (THE BRAND STANDARD)
+You are part of the decor. Solid black button-down shirt, black dress slacks, and black non-slip shoes — clean, pressed, and free of lint. Keep jewelry minimal and avoid heavy fragrances. No visible smartwatches or earbuds during service.
+
+2. SERVICE EXCELLENCE (THE INVISIBLE STANDARD)
+Strive for seamless, unobtrusive service. Guests always have the right of way. If you do not know an answer, say "I will find out for you immediately," and follow through. Keep personal conversations away from guest areas, and the floor clear of personal items.
+
+3. PROFESSIONAL BOUNDARIES & ALCOHOL
+You are there to serve the wedding, not to join it. No fraternizing, dancing, drinking, or personal photography during events. No staff member may consume alcohol while on the clock or on venue property. Bartenders must follow all Indiana ATC regulations; over-serving or unauthorized heavy pours are grounds for immediate dismissal.
+
+4. PRIVACY & SOCIAL MEDIA
+Event details, guest lists, and overheard conversations are strictly confidential. Do not capture or share any event content — including behind-the-scenes shots — on personal accounts. All official social media is handled by the Venue Manager.
+
+By acknowledging below, you confirm you have received, read, and understand this Handbook and agree to follow its policies."""
+
+DIRECT_DEPOSIT_TEXT = """DIRECT DEPOSIT AUTHORIZATION
+
+To receive your pay by direct deposit, provide your bank account details below. Your pay will be deposited electronically each pay period to the account you designate.
+
+• Double-check your routing and account numbers — incorrect information can delay your pay.
+• Your routing number is the 9-digit number on the bottom-left of a check.
+• You may change or cancel this authorization at any time by notifying the Venue Manager in writing.
+
+This authorization remains in effect until you provide written notice of a change. By signing, you authorize the venue and its payroll provider to deposit your wages to the account below."""
+
+W4_TEXT = """FORM W-4 — EMPLOYEE'S WITHHOLDING CERTIFICATE (Federal)
+
+Complete the fields below so the correct amount of federal income tax is withheld from your pay. This is a simplified representation of the IRS Form W-4 for onboarding; your legal name and Social Security number are captured on the official signed IRS form and are not stored in this system.
+
+• Step 1c — Filing status determines your standard withholding.
+• Step 2 — Check the box only if you hold more than one job at a time, or you are married filing jointly and your spouse also works.
+• Step 3 — Enter the total dollar amount for dependents you wish to claim.
+• Step 4 — Enter any other income, extra deductions, or additional per-paycheck withholding.
+• Exemption — Check only if you meet BOTH conditions for exemption from withholding.
+
+Under penalties of perjury, you declare that the information you provide is true, correct, and complete."""
+
+I9_TEXT = """FORM I-9 — EMPLOYMENT ELIGIBILITY VERIFICATION
+
+Federal law requires every employee to attest to their identity and authorization to work in the United States. This step records your attestation and the documents you will present; physical document examination is completed in person on or before your first day, as required by U.S. Citizenship and Immigration Services.
+
+• Select the citizenship / immigration status that applies to you.
+• Select the document(s) you will present — either one document from List A, or one from List B plus one from List C.
+• Bring the actual documents (unexpired and original) to your first shift for verification.
+
+You attest, under penalty of perjury, that the information you provide is true and correct, and you are aware that federal law provides for imprisonment and/or fines for false statements or use of false documents."""
+
+EMERGENCY_TEXT = """EMERGENCY CONTACT INFORMATION
+
+In the event of an emergency during a shift, who should we contact on your behalf? Please provide someone who is typically reachable by phone. You can update this information at any time by contacting the Venue Manager."""
+
+
+# ─── Onboarding Wizard Step Definitions ───────────────────────────────────────
+# Each step renders through templates/onboard_step.html. Order = completion order.
+ONBOARDING_STEPS = [
+    {
+        'key': 'agreement',
+        'title': 'Staff Uniform & Professional Conduct Agreement',
+        'subtitle': 'Please read carefully and sign below',
+        'body': AGREEMENT_TEXT,
+        'ack': 'I have read and understand the Staff Uniform & Professional Conduct Agreement above, and I agree to comply with all terms.',
+        'signature': True,
+        'fields': [],
+    },
+    {
+        'key': 'handbook',
+        'title': 'Employee Handbook Acknowledgment',
+        'subtitle': 'Confirm you have reviewed the staff handbook',
+        'body': HANDBOOK_TEXT,
+        'ack': 'I acknowledge that I have received, read, and understand the Employee Handbook and agree to follow its policies.',
+        'signature': True,
+        'fields': [],
+    },
+    {
+        'key': 'direct_deposit',
+        'title': 'Direct Deposit Authorization',
+        'subtitle': 'Set up electronic payroll deposit',
+        'body': DIRECT_DEPOSIT_TEXT,
+        'ack': 'I authorize direct deposit of my pay to the account below and confirm the information is accurate.',
+        'signature': True,
+        'fields': [
+            {'name': 'account_holder', 'label': 'Name on account', 'type': 'text', 'required': True},
+            {'name': 'bank_name', 'label': 'Bank name', 'type': 'text', 'required': True},
+            {'name': 'account_type', 'label': 'Account type', 'type': 'select', 'options': ['Checking', 'Savings'], 'required': True},
+            {'name': 'routing_number', 'label': 'Routing number (9 digits)', 'type': 'text', 'required': True, 'placeholder': '123456789'},
+            {'name': 'account_number', 'label': 'Account number', 'type': 'text', 'required': True},
+        ],
+    },
+    {
+        'key': 'w4',
+        'title': 'Form W-4 — Federal Tax Withholding',
+        'subtitle': 'Tell us how to withhold federal income tax',
+        'body': W4_TEXT,
+        'ack': 'Under penalties of perjury, I declare that this withholding information is true, correct, and complete.',
+        'signature': True,
+        'fields': [
+            {'name': 'filing_status', 'label': 'Filing status (Step 1c)', 'type': 'select',
+             'options': ['Single or Married filing separately',
+                         'Married filing jointly or Qualifying surviving spouse',
+                         'Head of household'], 'required': True},
+            {'name': 'multiple_jobs', 'label': 'Multiple jobs, or spouse also works (Step 2)', 'type': 'checkbox', 'required': False},
+            {'name': 'dependents_amount', 'label': 'Claim dependents — total $ (Step 3)', 'type': 'text', 'required': False, 'placeholder': '0.00'},
+            {'name': 'other_income', 'label': 'Other income, not from jobs (Step 4a)', 'type': 'text', 'required': False, 'placeholder': '0.00'},
+            {'name': 'deductions', 'label': 'Deductions beyond standard (Step 4b)', 'type': 'text', 'required': False, 'placeholder': '0.00'},
+            {'name': 'extra_withholding', 'label': 'Extra withholding per paycheck (Step 4c)', 'type': 'text', 'required': False, 'placeholder': '0.00'},
+            {'name': 'exempt', 'label': 'I claim exemption from withholding for this year', 'type': 'checkbox', 'required': False},
+        ],
+    },
+    {
+        'key': 'i9',
+        'title': 'Form I-9 — Employment Eligibility',
+        'subtitle': 'Attest to your eligibility to work in the U.S.',
+        'body': I9_TEXT,
+        'ack': 'I attest, under penalty of perjury, that the information above is true and correct, and I am aware that federal law provides penalties for false statements.',
+        'signature': True,
+        'fields': [
+            {'name': 'citizenship_status', 'label': 'Citizenship / immigration status', 'type': 'select',
+             'options': ['A citizen of the United States',
+                         'A noncitizen national of the United States',
+                         'A lawful permanent resident',
+                         'An alien authorized to work'], 'required': True},
+            {'name': 'id_documents', 'label': 'Documents you will present', 'type': 'select',
+             'options': ['List A — U.S. Passport or Passport Card',
+                         'List A — Permanent Resident Card (Green Card)',
+                         'List A — Employment Authorization Document',
+                         "List B + C — Driver's License + Social Security Card",
+                         'List B + C — State ID + Birth Certificate'], 'required': True},
+        ],
+    },
+    {
+        'key': 'emergency_contact',
+        'title': 'Emergency Contact',
+        'subtitle': 'Who should we call in an emergency?',
+        'body': EMERGENCY_TEXT,
+        'ack': 'I confirm the emergency contact information above is accurate.',
+        'signature': False,
+        'fields': [
+            {'name': 'contact_name', 'label': 'Emergency contact name', 'type': 'text', 'required': True},
+            {'name': 'contact_phone', 'label': 'Emergency contact phone', 'type': 'tel', 'required': True},
+            {'name': 'relationship', 'label': 'Relationship to you', 'type': 'text', 'required': True},
+        ],
+    },
+]
+
+ONBOARDING_STEP_KEYS = [s['key'] for s in ONBOARDING_STEPS]
+
 # ─── DB helpers (PostgreSQL via psycopg2, SQLite-compatible shim) ──────────────
 
 import psycopg2
@@ -333,6 +485,17 @@ def init_db():
         updated_at TEXT NOT NULL,
         FOREIGN KEY (staff_id) REFERENCES staff(id)
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS onboarding_documents (
+        id TEXT PRIMARY KEY,
+        staff_id TEXT NOT NULL,
+        doc_type TEXT NOT NULL,
+        signed_at TEXT NOT NULL,
+        ip_address TEXT,
+        signature_image TEXT,
+        data_json TEXT NOT NULL DEFAULT '{}',
+        UNIQUE (staff_id, doc_type),
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+    )''')
     # Seed default venue config
     c.execute('INSERT OR IGNORE INTO venue_config (id, venue_name) VALUES (1, ?)', ('Our Venue',))
     c.execute('INSERT OR IGNORE INTO venue_settings (id, tip_pool_enabled, tipout_rate) VALUES (1, 0, 20.0)')
@@ -544,8 +707,17 @@ def staff_detail(staff_id):
         c.execute('SELECT * FROM staff_profiles WHERE staff_id = ?', (staff_id,))
         profile = c.fetchone()
 
+    # Onboarding document progress for admin visibility
+    c.execute('SELECT doc_type, signed_at FROM onboarding_documents WHERE staff_id = ?', (staff_id,))
+    _done = {r['doc_type']: r['signed_at'] for r in c.fetchall()}
+    if staff_member['agreement_status'] == 'signed':
+        _done.setdefault('agreement', None)
+    onboarding_docs = [{'title': s['title'], 'done': s['key'] in _done, 'signed_at': _done.get(s['key'])}
+                       for s in ONBOARDING_STEPS]
+    onboarding_complete = all(d['done'] for d in onboarding_docs)
     conn.close()
     return render_template('staff_detail.html', staff=staff_member, profile=profile,
+                          onboarding_docs=onboarding_docs, onboarding_complete=onboarding_complete,
                           admin_name=session.get('admin_name'))
 
 @app.route('/admin/staff/<staff_id>/agreement')
@@ -574,42 +746,113 @@ def resend_link(staff_id):
     conn.close()
     return redirect(url_for('staff_list'))
 
+def _completed_onboarding_docs(c, staff_member):
+    """Set of completed onboarding doc_type keys for a staff member."""
+    c.execute('SELECT doc_type FROM onboarding_documents WHERE staff_id = ?', (staff_member['id'],))
+    done = {r['doc_type'] for r in c.fetchall()}
+    # Back-compat: a pre-existing signed agreement counts as the agreement step
+    if staff_member['agreement_status'] == 'signed':
+        done.add('agreement')
+    return done
+
+
+def _upsert_profile(c, staff_id, fields):
+    """Update only the given staff_profiles columns, creating the row if needed.
+    Column names come from server-side step definitions (never user input)."""
+    now = datetime.utcnow().isoformat()
+    c.execute("INSERT INTO staff_profiles (staff_id, updated_at) VALUES (?, ?) ON CONFLICT (staff_id) DO NOTHING",
+              (staff_id, now))
+    if fields:
+        assigns = ', '.join(f"{col} = ?" for col in fields) + ", updated_at = ?"
+        params = list(fields.values()) + [now, staff_id]
+        c.execute(f"UPDATE staff_profiles SET {assigns} WHERE staff_id = ?", params)
+
+
 @app.route('/onboard/<token>', methods=['GET', 'POST'])
 def onboard(token):
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT * FROM staff WHERE onboarding_token = ?', (token,))
     staff_member = c.fetchone()
-    conn.close()
     if not staff_member:
+        conn.close()
         return "Invalid or expired onboarding link.", 404
-    if staff_member['agreement_status'] == 'signed':
-        return redirect(url_for('onboard_thanks', token=token))
+
     if request.method == 'POST':
-        signature_data = request.form.get('signature_data')
-        if not signature_data:
-            flash('Signature is required.', 'error')
-            return render_template('agreement.html', staff=staff_member, agreement_text=AGREEMENT_TEXT)
-        # Decode and save signature image
-        import base64
-        sig_bytes = base64.b64decode(signature_data.split(',')[1])
-        sig_filename = f'sig_{staff_member["id"]}_{datetime.utcnow().strftime("%Y%m%d%H%M%S")}.png'
-        sig_path = os.path.join(app.config['UPLOAD_FOLDER'], sig_filename)
-        with open(sig_path, 'wb') as f:
-            f.write(sig_bytes)
-        # Save agreement
-        conn = get_db()
-        c = conn.cursor()
-        agreement_id = str(uuid.uuid4())
-        c.execute('''INSERT INTO agreements (id, staff_id, signed_at, ip_address, signature_image, agreement_text)
-                     VALUES (?, ?, ?, ?, ?, ?)''',
-                  (agreement_id, staff_member['id'], datetime.utcnow().isoformat(),
-                   request.remote_addr, sig_filename, AGREEMENT_TEXT))
-        c.execute("UPDATE staff SET agreement_status = 'signed' WHERE id = ?", (staff_member['id'],))
+        step_key = request.form.get('step_key')
+        step = next((s for s in ONBOARDING_STEPS if s['key'] == step_key), None)
+        if not step:
+            conn.close()
+            return redirect(url_for('onboard', token=token))
+
+        # Collect + validate fields
+        field_data = {}
+        for f in step['fields']:
+            if f['type'] == 'checkbox':
+                field_data[f['name']] = 'yes' if request.form.get(f['name']) else 'no'
+            else:
+                val = (request.form.get(f['name']) or '').strip()
+                if f.get('required') and not val:
+                    flash(f"{f['label']} is required.", 'error')
+                    conn.close()
+                    return redirect(url_for('onboard', token=token))
+                field_data[f['name']] = val
+
+        # Validate signature when required
+        signature_data = request.form.get('signature_data', '')
+        if step['signature'] and (not signature_data or ',' not in signature_data):
+            flash('Your signature is required.', 'error')
+            conn.close()
+            return redirect(url_for('onboard', token=token))
+
+        now = datetime.utcnow().isoformat()
+        # Store the signed document — signature kept as a base64 data URL in the DB
+        c.execute('''INSERT INTO onboarding_documents (id, staff_id, doc_type, signed_at, ip_address, signature_image, data_json)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT (staff_id, doc_type) DO UPDATE SET
+                         signed_at = EXCLUDED.signed_at,
+                         ip_address = EXCLUDED.ip_address,
+                         signature_image = EXCLUDED.signature_image,
+                         data_json = EXCLUDED.data_json''',
+                  (str(uuid.uuid4()), staff_member['id'], step_key, now,
+                   request.remote_addr, signature_data or None, json.dumps(field_data)))
+
+        # Step-specific side effects
+        if step_key == 'agreement':
+            c.execute('''INSERT INTO agreements (id, staff_id, signed_at, ip_address, signature_image, agreement_text)
+                         VALUES (?, ?, ?, ?, ?, ?)''',
+                      (str(uuid.uuid4()), staff_member['id'], now, request.remote_addr,
+                       signature_data or None, AGREEMENT_TEXT))
+            c.execute("UPDATE staff SET agreement_status = 'signed' WHERE id = ?", (staff_member['id'],))
+        elif step_key == 'direct_deposit':
+            _upsert_profile(c, staff_member['id'], {
+                'bank_name': field_data.get('bank_name', ''),
+                'bank_routing': field_data.get('routing_number', ''),
+                'bank_account': field_data.get('account_number', ''),
+            })
+        elif step_key == 'w4':
+            _upsert_profile(c, staff_member['id'], {'tax_withholding': field_data.get('filing_status', '')})
+        elif step_key == 'emergency_contact':
+            _upsert_profile(c, staff_member['id'], {
+                'emergency_contact_name': field_data.get('contact_name', ''),
+                'emergency_contact_phone': field_data.get('contact_phone', ''),
+                'emergency_contact_relationship': field_data.get('relationship', ''),
+            })
+
         conn.commit()
         conn.close()
+        return redirect(url_for('onboard', token=token))
+
+    # GET — advance to the first incomplete step
+    done = _completed_onboarding_docs(c, staff_member)
+    conn.close()
+    next_step = next((s for s in ONBOARDING_STEPS if s['key'] not in done), None)
+    if next_step is None:
         return redirect(url_for('onboard_thanks', token=token))
-    return render_template('agreement.html', staff=staff_member, agreement_text=AGREEMENT_TEXT)
+    step_index = ONBOARDING_STEP_KEYS.index(next_step['key'])
+    return render_template('onboard_step.html', staff=staff_member, step=next_step,
+                           step_number=step_index + 1, total_steps=len(ONBOARDING_STEPS))
+
 
 @app.route('/onboard/<token>/thanks')
 def onboard_thanks(token):
@@ -617,10 +860,14 @@ def onboard_thanks(token):
     c = conn.cursor()
     c.execute('SELECT * FROM staff WHERE onboarding_token = ?', (token,))
     staff_member = c.fetchone()
-    conn.close()
     if not staff_member:
+        conn.close()
         return "Invalid link.", 404
-    return render_template('onboard_thanks.html', staff=staff_member)
+    done = _completed_onboarding_docs(c, staff_member)
+    conn.close()
+    steps = [{'title': s['title'], 'done': s['key'] in done} for s in ONBOARDING_STEPS]
+    all_done = all(st['done'] for st in steps)
+    return render_template('onboard_thanks.html', staff=staff_member, steps=steps, all_done=all_done)
 
 @app.route('/static/uploads/<filename>')
 def serve_signature(filename):
