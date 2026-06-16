@@ -43,6 +43,7 @@
                 <td class="py-3">{{ event.guest_count }}</td>
                 <td class="py-3">
                     <a href="{{ url_for('staffing_detail', event_id=event.id) }}" class="text-rose-600 hover:underline">Staffing</a>
+                    <a href="{{ url_for('event_qr', event_id=event.id) }}" class="text-rose-600 hover:underline ml-3">Rating QR</a>
                 </td>
             </tr>
             {% endfor %}
