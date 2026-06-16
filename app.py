@@ -118,16 +118,53 @@ PRIVACY: Do not post photos or videos of the wedding party, their decor, or thei
 
 CONFIDENTIALITY: Respect the privacy of our clients. What you hear or see at a private event stays at the event."""
 
-# ─── Simple DB helpers (SQLite) ───────────────────────────────────────────────
+# ─── DB helpers (PostgreSQL via psycopg2, SQLite-compatible shim) ──────────────
 
-import sqlite3
+import psycopg2
+import psycopg2.extras
+import psycopg2.extensions
 
-DB_PATH = '/home/team/shared/hraas.db'
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+
+def _translate(sql):
+    """Translate this app's SQLite dialect into PostgreSQL at execute() time.
+
+    1. '?' positional placeholders -> '%s'. Every '?' in this codebase's query
+       strings is a bind placeholder; the only '?' chars in literal text live in
+       parameter VALUES, never in the SQL string, so a blanket replace is safe.
+    2. 'INSERT OR IGNORE' -> 'INSERT ... ON CONFLICT DO NOTHING' (matches
+       SQLite's ignore-on-any-uniqueness-conflict semantics).
+    """
+    sql = sql.replace('?', '%s')
+    head = sql.lstrip()
+    if head[:21].upper() == 'INSERT OR IGNORE INTO':
+        idx = sql.upper().find('INSERT OR IGNORE INTO')
+        sql = sql[:idx] + 'INSERT INTO' + sql[idx + len('INSERT OR IGNORE INTO'):]
+        sql = sql.rstrip().rstrip(';') + ' ON CONFLICT DO NOTHING'
+    return sql
+
+
+class _ShimCursor(psycopg2.extras.DictCursor):
+    """Cursor that translates SQLite SQL and yields dict-like rows.
+
+    DictRow supports both integer and string indexing like sqlite3.Row, so the
+    existing ~125 execute()/fetchone()['col'] call sites are unchanged.
+    """
+    def execute(self, query, vars=None):
+        return super().execute(_translate(query), vars)
+
+
+class _ShimConnection(psycopg2.extensions.connection):
+    def cursor(self, *args, **kwargs):
+        kwargs.setdefault('cursor_factory', _ShimCursor)
+        return super().cursor(*args, **kwargs)
+
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if not DATABASE_URL:
+        raise RuntimeError('DATABASE_URL environment variable is not set')
+    return psycopg2.connect(DATABASE_URL, connection_factory=_ShimConnection)
 
 def init_db():
     conn = get_db()
@@ -477,12 +514,26 @@ def staff_detail(staff_id):
         tax_withholding = request.form.get('tax_withholding', '')
         notes = request.form.get('notes', '')
         now = datetime.utcnow().isoformat()
-        c.execute('''INSERT OR REPLACE INTO staff_profiles
+        c.execute('''INSERT INTO staff_profiles
                      (staff_id, emergency_contact_name, emergency_contact_phone,
                       emergency_contact_relationship, bank_name, bank_routing, bank_account,
                       license_type, license_number, license_state, license_expires,
                       tax_withholding, notes, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT (staff_id) DO UPDATE SET
+                         emergency_contact_name = EXCLUDED.emergency_contact_name,
+                         emergency_contact_phone = EXCLUDED.emergency_contact_phone,
+                         emergency_contact_relationship = EXCLUDED.emergency_contact_relationship,
+                         bank_name = EXCLUDED.bank_name,
+                         bank_routing = EXCLUDED.bank_routing,
+                         bank_account = EXCLUDED.bank_account,
+                         license_type = EXCLUDED.license_type,
+                         license_number = EXCLUDED.license_number,
+                         license_state = EXCLUDED.license_state,
+                         license_expires = EXCLUDED.license_expires,
+                         tax_withholding = EXCLUDED.tax_withholding,
+                         notes = EXCLUDED.notes,
+                         updated_at = EXCLUDED.updated_at''',
                   (staff_id, emergency_name, emergency_phone, emergency_rel,
                    bank_name, bank_routing, bank_account,
                    license_type, license_number, license_state, license_expires,
@@ -1287,7 +1338,7 @@ def handle_clock(phone: str, body: str, action: str):
     if action == 'IN':
         # Check if already clocked in today
         c.execute('''SELECT id FROM timesheet_entries
-                     WHERE staff_id=? AND date(clock_in)=? AND clock_out IS NULL''',
+                     WHERE staff_id=? AND LEFT(clock_in, 10)=? AND clock_out IS NULL''',
                   (staff_id, today))
         existing = c.fetchone()
         if existing:
@@ -1316,7 +1367,7 @@ def handle_clock(phone: str, body: str, action: str):
 
     else:  # OUT
         c.execute('''SELECT id, clock_in, break_start FROM timesheet_entries
-                     WHERE staff_id=? AND date(clock_in)=? AND clock_out IS NULL
+                     WHERE staff_id=? AND LEFT(clock_in, 10)=? AND clock_out IS NULL
                      ORDER BY clock_in DESC LIMIT 1''',
                   (staff_id, today))
         entry = c.fetchone()
@@ -1364,7 +1415,7 @@ def handle_break_response(phone: str, body: str):
     staff_name = staff['name']
 
     c.execute('''SELECT id, clock_in, break_start FROM timesheet_entries
-                 WHERE staff_id=? AND date(clock_in)=? AND clock_out IS NULL
+                 WHERE staff_id=? AND LEFT(clock_in, 10)=? AND clock_out IS NULL
                  ORDER BY clock_in DESC LIMIT 1''', (staff_id, today))
     entry = c.fetchone()
     conn.close()
@@ -1761,8 +1812,14 @@ def start_onboarding(phone: str, body: str):
     data = json.dumps({'role': role})
     conn = get_db()
     c = conn.cursor()
-    c.execute('''INSERT OR REPLACE INTO onboarding_state (phone, step, data_json, dob, assigned_role, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?)''',
+    c.execute('''INSERT INTO onboarding_state (phone, step, data_json, dob, assigned_role, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (phone) DO UPDATE SET
+                     step = EXCLUDED.step,
+                     data_json = EXCLUDED.data_json,
+                     dob = EXCLUDED.dob,
+                     assigned_role = EXCLUDED.assigned_role,
+                     updated_at = EXCLUDED.updated_at''',
              (phone, 'BASIC_INFO', data, dob.strftime('%m/%d/%Y'), role, datetime.utcnow().isoformat()))
     conn.commit()
     conn.close()
@@ -1970,8 +2027,14 @@ def save_onboarding_state(phone: str, step: str, data: dict):
         assigned_role = data['role']
     merged = dict(json.loads(row['data_json'])) if row and row['data_json'] and row['data_json'] not in ('', '{}') else {}
     merged.update(data)
-    c.execute('''INSERT OR REPLACE INTO onboarding_state (phone, step, data_json, dob, assigned_role, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?)''',
+    c.execute('''INSERT INTO onboarding_state (phone, step, data_json, dob, assigned_role, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (phone) DO UPDATE SET
+                     step = EXCLUDED.step,
+                     data_json = EXCLUDED.data_json,
+                     dob = EXCLUDED.dob,
+                     assigned_role = EXCLUDED.assigned_role,
+                     updated_at = EXCLUDED.updated_at''',
              (phone, step, json.dumps(merged), dob, assigned_role, datetime.utcnow().isoformat()))
     conn.commit()
     conn.close()
@@ -2029,6 +2092,14 @@ def find_best_faq_answer(query: str) -> str:
     return ("I'm not sure I understood that. For help, please contact your Lead Coordinator "
             f"or visit our FAQ page: {request.host_url}faq")
 
-if __name__ == '__main__':
+# Ensure the schema exists at import time so tables are created under gunicorn
+# on Render, where __main__ never runs. Idempotent (CREATE TABLE IF NOT EXISTS +
+# ON CONFLICT DO NOTHING seeds), so repeated/concurrent worker startup is safe.
+try:
     init_db()
+except Exception:
+    import traceback
+    traceback.print_exc()
+
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
