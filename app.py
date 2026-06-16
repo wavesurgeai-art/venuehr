@@ -496,6 +496,7 @@ def init_db():
         UNIQUE (staff_id, doc_type),
         FOREIGN KEY (staff_id) REFERENCES staff(id)
     )''')
+    conn.commit()  # commit schema before seeding so table creation is durable
     # Seed default venue config
     c.execute('INSERT OR IGNORE INTO venue_config (id, venue_name) VALUES (1, ?)', ('Our Venue',))
     c.execute('INSERT OR IGNORE INTO venue_settings (id, tip_pool_enabled, tipout_rate) VALUES (1, 0, 20.0)')
@@ -650,6 +651,7 @@ def staff_list():
 @app.route('/admin/staff/<staff_id>')
 @login_required
 def staff_detail(staff_id):
+    ensure_onboarding_schema()
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT * FROM staff WHERE id = ?', (staff_id,))
@@ -746,6 +748,36 @@ def resend_link(staff_id):
     conn.close()
     return redirect(url_for('staff_list'))
 
+_onboarding_schema_ready = False
+
+
+def ensure_onboarding_schema():
+    """Idempotently ensure the onboarding_documents table exists.
+    Self-heals if a boot-time init_db did not create it (e.g. transient DB hiccup)."""
+    global _onboarding_schema_ready
+    if _onboarding_schema_ready:
+        return
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS onboarding_documents (
+            id TEXT PRIMARY KEY,
+            staff_id TEXT NOT NULL,
+            doc_type TEXT NOT NULL,
+            signed_at TEXT NOT NULL,
+            ip_address TEXT,
+            signature_image TEXT,
+            data_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE (staff_id, doc_type),
+            FOREIGN KEY (staff_id) REFERENCES staff(id)
+        )''')
+        conn.commit()
+        conn.close()
+        _onboarding_schema_ready = True
+    except Exception:
+        pass  # leave flag False so the next request retries
+
+
 def _completed_onboarding_docs(c, staff_member):
     """Set of completed onboarding doc_type keys for a staff member."""
     c.execute('SELECT doc_type FROM onboarding_documents WHERE staff_id = ?', (staff_member['id'],))
@@ -770,6 +802,7 @@ def _upsert_profile(c, staff_id, fields):
 
 @app.route('/onboard/<token>', methods=['GET', 'POST'])
 def onboard(token):
+    ensure_onboarding_schema()
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT * FROM staff WHERE onboarding_token = ?', (token,))
@@ -856,6 +889,7 @@ def onboard(token):
 
 @app.route('/onboard/<token>/thanks')
 def onboard_thanks(token):
+    ensure_onboarding_schema()
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT * FROM staff WHERE onboarding_token = ?', (token,))
