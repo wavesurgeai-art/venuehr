@@ -1138,6 +1138,15 @@ def demo_mode():
         ('cont-007', venue_id, 'Bloom & Wild Florals — Aisha Williams',    'aisha@bloomwildflorals.com',   '+1 317-555-0407', 'Florist',      '2025-02-05', uuid.uuid4().hex, 'signed', now.isoformat()),
         ('cont-008', venue_id, 'Cinema Stories Videography — Jose Rivera', 'jose@cinemastories.com',       '+1 317-555-0408', 'Videographer', '2025-02-10', uuid.uuid4().hex, 'signed', now.isoformat()),
         ('cont-009', venue_id, 'Ceremony & Soul Officiant — Rev. Patricia Cole','patricia@ceremonyandsoul.com','+1 317-555-0409', 'Officiant',    '2025-02-15', uuid.uuid4().hex, 'signed', now.isoformat()),
+        # Additional caterers
+        ('cont-010', venue_id, 'Harvest & Hearth Catering — Bianca Russo',     'bianca@harvesthearth.com',       '+1 317-555-0410', 'Caterer',      '2025-02-18', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-011', venue_id, 'Saffron Table Catering — Devin Okafor',       'devin@saffrontable.com',         '+1 317-555-0411', 'Caterer',      '2025-02-20', uuid.uuid4().hex, 'signed', now.isoformat()),
+        # Additional videographers
+        ('cont-012', venue_id, 'Evergreen Wedding Films — Holly Tran',        'holly@evergreenfilms.com',       '+1 317-555-0412', 'Videographer', '2025-02-22', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-013', venue_id, 'Heartframe Films — Andre Castillo',           'andre@heartframefilms.com',      '+1 317-555-0413', 'Videographer', '2025-02-25', uuid.uuid4().hex, 'signed', now.isoformat()),
+        # Additional photographers
+        ('cont-014', venue_id, 'Lumen & Lace Photography — Priya Desai',      'priya@lumenlace.com',            '+1 317-555-0414', 'Photographer', '2025-02-28', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-015', venue_id, 'Stillwater Studios — Cole Bennett',           'cole@stillwaterstudios.com',     '+1 317-555-0415', 'Photographer', '2025-03-03', uuid.uuid4().hex, 'signed', now.isoformat()),
     ]
     for row in staff_records:
         try:
