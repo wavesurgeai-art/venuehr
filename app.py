@@ -1005,7 +1005,7 @@ def admin_ratings():
     c.execute('''SELECT AVG(r.rating) as avg_rating, COUNT(*) as count, s.name, s.role
                  FROM performance_ratings r
                  JOIN staff s ON r.staff_id=s.id
-                 GROUP BY r.staff_id
+                 GROUP BY r.staff_id, s.name, s.role
                  ORDER BY avg_rating DESC''')
     ratings = c.fetchall()
     c.execute('SELECT COUNT(*) as total, AVG(rating) as overall FROM performance_ratings')
