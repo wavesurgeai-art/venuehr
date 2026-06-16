@@ -1078,6 +1078,7 @@ def seed_data():
     return redirect(url_for('staff_list'))
 
 @app.route('/demo', methods=['GET'])
+@login_required
 def demo_mode():
     """Set up a full demo state: seed staff, create venue, create event, seed timesheets, tips, swaps, ratings, incidents."""
     import uuid
@@ -1146,8 +1147,9 @@ def demo_mode():
             pass
 
     # ── Set venue name ─────────────────────────────────────────────────────────
-    c.execute("INSERT OR IGNORE INTO venue_config (id, venue_name, manager_phone, tip_pool_enabled, tipout_rate) VALUES (1, ?, '+13175550101', 0, 20.0)",
-               ('Mustard Seed Gardens',))
+    c.execute("""INSERT INTO venue_config (id, venue_name, manager_phone, tip_pool_enabled, tipout_rate) VALUES (1, ?, '+13175550101', 0, 20.0)
+                 ON CONFLICT (id) DO UPDATE SET venue_name = EXCLUDED.venue_name, manager_phone = EXCLUDED.manager_phone""",
+               ('Willowmere Gardens',))
 
     # ── Create demo event ─────────────────────────────────────────────────────
     event_id = str(uuid.uuid4())
@@ -1242,14 +1244,14 @@ def demo_mode():
                 c.execute("""INSERT INTO agreements (id, staff_id, signed_at, ip_address, signature_image, agreement_text)
                                VALUES (?, ?, ?, '127.0.0.1', 'demo_signature.png', ?)""",
                            (agreement_id, staff_id, now.isoformat(),
-                            'Staff Uniform & Professional Conduct Agreement — Mustard Seed Gardens'))
+                            'Staff Uniform & Professional Conduct Agreement — Willowmere Gardens'))
     except Exception:
         pass
 
     conn.commit()
     conn.close()
 
-    flash('Demo data ready — Mustard Seed Gardens, Johnson Wedding, pre-populated staff and activity.', 'success')
+    flash('Demo data ready — Willowmere Gardens, Johnson Wedding, pre-populated staff and activity.', 'success')
     return redirect(url_for('dashboard'))
 
 @app.route('/admin/settings', methods=['GET', 'POST'])
