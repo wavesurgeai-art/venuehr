@@ -711,10 +711,12 @@ def staff_detail(staff_id):
 
     # Onboarding document progress for admin visibility
     c.execute('SELECT doc_type, signed_at FROM onboarding_documents WHERE staff_id = ?', (staff_id,))
-    _done = {r['doc_type']: r['signed_at'] for r in c.fetchall()}
+    _rows = {r['doc_type']: r['signed_at'] for r in c.fetchall()}
+    _done = dict(_rows)
     if staff_member['agreement_status'] == 'signed':
         _done.setdefault('agreement', None)
-    onboarding_docs = [{'title': s['title'], 'done': s['key'] in _done, 'signed_at': _done.get(s['key'])}
+    onboarding_docs = [{'key': s['key'], 'title': s['title'], 'done': s['key'] in _done,
+                        'viewable': s['key'] in _rows, 'signed_at': _done.get(s['key'])}
                        for s in ONBOARDING_STEPS]
     onboarding_complete = all(d['done'] for d in onboarding_docs)
     conn.close()
@@ -734,6 +736,39 @@ def view_agreement(staff_id):
         flash('Agreement not found.', 'error')
         return redirect(url_for('staff_detail', staff_id=staff_id))
     return render_template('view_agreement.html', agreement=agreement, admin_name=session.get('admin_name'))
+
+
+@app.route('/admin/staff/<staff_id>/onboarding/<doc_type>')
+@login_required
+def view_onboarding_doc(staff_id, doc_type):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM staff WHERE id = ?', (staff_id,))
+    staff_member = c.fetchone()
+    if not staff_member:
+        conn.close()
+        flash('Staff member not found.', 'error')
+        return redirect(url_for('staff_list'))
+    c.execute('SELECT * FROM onboarding_documents WHERE staff_id = ? AND doc_type = ?', (staff_id, doc_type))
+    doc = c.fetchone()
+    conn.close()
+    if not doc:
+        flash('That onboarding document has not been completed yet.', 'error')
+        return redirect(url_for('staff_detail', staff_id=staff_id))
+    step = next((s for s in ONBOARDING_STEPS if s['key'] == doc_type), None)
+    try:
+        data = json.loads(doc['data_json']) if doc['data_json'] else {}
+    except Exception:
+        data = {}
+    field_rows = []
+    if step:
+        for f in step['fields']:
+            val = data.get(f['name'], '')
+            if f['type'] == 'checkbox':
+                val = 'Yes' if val == 'yes' else 'No'
+            field_rows.append({'label': f['label'], 'value': val or '—'})
+    return render_template('view_onboarding_doc.html', staff=staff_member, doc=doc, step=step,
+                           field_rows=field_rows, admin_name=session.get('admin_name'))
 
 @app.route('/admin/staff/<staff_id>/resend-link', methods=['POST'])
 @login_required
