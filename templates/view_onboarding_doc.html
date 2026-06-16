@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}{{ step.title if step else 'Document' }} — VenueHR{% endblock %}
+
+{% block content %}
+<div class="mb-8 flex justify-between items-center">
+    <div>
+        <a href="{{ url_for('staff_detail', staff_id=staff.id) }}" class="text-sm text-gray-500 hover:text-gray-700">← Back to {{ staff.name }}</a>
+        <h1 class="text-2xl font-bold text-gray-900 mt-2">{{ step.title if step else doc.doc_type }}</h1>
+        <p class="text-gray-500">Signed by {{ staff.name }}</p>
+    </div>
+    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800">Signed</span>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm p-8 border border-gray-200 mb-6">
+    <div class="grid grid-cols-2 gap-6 mb-6 pb-6 border-b border-gray-200">
+        <div>
+            <p class="text-sm text-gray-500">Signed At</p>
+            <p class="font-medium text-gray-900">{{ doc.signed_at[:19].replace('T', ' ') }} UTC</p>
+        </div>
+        <div>
+            <p class="text-sm text-gray-500">IP Address</p>
+            <p class="font-medium text-gray-900">{{ doc.ip_address or '—' }}</p>
+        </div>
+    </div>
+
+    {% if field_rows %}
+    <h3 class="text-sm font-medium text-gray-500 mb-3">Information Provided</h3>
+    <div class="overflow-hidden rounded-lg border border-gray-200 mb-6">
+        <table class="w-full text-sm">
+            <tbody>
+                {% for row in field_rows %}
+                <tr class="border-b border-gray-100 last:border-0">
+                    <td class="px-4 py-3 text-gray-500 w-1/2 bg-gray-50">{{ row.label }}</td>
+                    <td class="px-4 py-3 text-gray-900 font-medium">{{ row.value }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <h3 class="text-sm font-medium text-gray-500 mb-3">Signature on File</h3>
+    {% if doc.signature_image and doc.signature_image.startswith('data:') %}
+    <img src="{{ doc.signature_image }}" alt="Staff Signature" class="border border-gray-200 rounded-lg max-w-md bg-white">
+    {% elif doc.signature_image %}
+    <img src="{{ url_for('serve_signature', filename=doc.signature_image) }}" alt="Staff Signature" class="border border-gray-200 rounded-lg max-w-md bg-white">
+    {% else %}
+    <p class="text-gray-400 italic">No signature required for this document.</p>
+    {% endif %}
+</div>
+
+{% if step %}
+<div class="bg-white rounded-xl shadow-sm p-8 border border-gray-200">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Document Text (as presented)</h2>
+    <div class="prose prose-sm max-w-none text-gray-700 whitespace-pre-line">{{ step.body }}</div>
+</div>
+{% endif %}
+{% endblock %}
