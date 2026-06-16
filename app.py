@@ -1296,7 +1296,7 @@ def admin_swaps():
     """View and manage shift swap requests."""
     conn = get_db()
     c = conn.cursor()
-    c.execute('''SELECT s.id, s.name, s.phone, r.event_id, r.reason, r.status, r.created_at
+    c.execute('''SELECT r.id AS swap_id, s.id, s.name, s.phone, r.event_id, r.reason, r.status, r.created_at
                  FROM shift_swap_requests r
                  JOIN staff s ON r.staff_id=s.id
                  ORDER BY r.created_at DESC LIMIT 50''')
@@ -1311,6 +1311,39 @@ def admin_swaps():
                           pending_count=pending_count, approved_count=approved_count,
                           denied_count=denied_count,
                           admin_name=session.get('admin_name'))
+
+
+@app.route('/admin/swaps/<swap_id>/<action>', methods=['POST'])
+@login_required
+def update_swap(swap_id, action):
+    """Approve or deny a shift swap request."""
+    if action not in ('approve', 'deny'):
+        flash('Invalid action.', 'error')
+        return redirect(url_for('admin_swaps'))
+    new_status = 'approved' if action == 'approve' else 'denied'
+    conn = get_db()
+    c = conn.cursor()
+    # Look up the requester so we can notify them
+    c.execute('''SELECT s.name, s.phone, r.status
+                 FROM shift_swap_requests r JOIN staff s ON r.staff_id = s.id
+                 WHERE r.id = ?''', (swap_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        flash('Swap request not found.', 'error')
+        return redirect(url_for('admin_swaps'))
+    c.execute("UPDATE shift_swap_requests SET status = ? WHERE id = ?", (new_status, swap_id))
+    conn.commit()
+    conn.close()
+    # Best-effort SMS notification to the requester (no-op if Twilio not configured)
+    try:
+        msg = (f"Your shift swap request has been {new_status}." if new_status == 'approved'
+               else f"Your shift swap request was {new_status}. Please contact your Lead Coordinator with questions.")
+        send_sms_alert(row['phone'], msg)
+    except Exception:
+        pass
+    flash(f"Swap request {new_status} for {row['name']}.", 'success')
+    return redirect(url_for('admin_swaps'))
 
 @app.route('/admin/ratings')
 @login_required
