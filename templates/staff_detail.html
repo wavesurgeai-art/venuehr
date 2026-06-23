@@ -90,7 +90,7 @@
                 {% if doc.done and doc.signed_at %}
                 <span class="flex items-center gap-3">
                     <span class="text-xs text-gray-400">Signed {{ doc.signed_at[:10] }}</span>
-                    {% if doc.viewable %}<a href="{{ url_for('view_onboarding_doc', staff_id=staff.id, doc_type=doc.key) }}" class="text-xs font-medium text-rose-600 hover:text-rose-700">View →</a>{% endif %}
+                    {% if doc.key == 'agreement' %}<a href="{{ url_for('view_agreement', staff_id=staff.id) }}" class="text-xs font-medium text-rose-600 hover:text-rose-700">View →</a>{% elif doc.viewable %}<a href="{{ url_for('view_onboarding_doc', staff_id=staff.id, doc_type=doc.key) }}" class="text-xs font-medium text-rose-600 hover:text-rose-700">View →</a>{% endif %}
                 </span>
                 {% elif doc.done %}
                 <span class="flex items-center gap-3">
