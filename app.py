@@ -648,7 +648,7 @@ def staff_list():
     conn.close()
     return render_template('staff_list.html', staff=staff_members, admin_name=session.get('admin_name'))
 
-@app.route('/admin/staff/<staff_id>')
+@app.route('/admin/staff/<staff_id>', methods=['GET', 'POST'])
 @login_required
 def staff_detail(staff_id):
     ensure_onboarding_schema()
@@ -1694,7 +1694,7 @@ def venue_settings():
         tip_rate = request.form.get('tipout_rate', '0.20')
         c.execute('DELETE FROM venue_config WHERE id = 1')
         c.execute('INSERT INTO venue_config (id, venue_name, manager_phone, tip_pool_enabled, tipout_rate) VALUES (1, ?, ?, ?, ?)',
-                  (venue_name, manager_phone, bool(tip_pool), float(tip_rate)))
+                  (venue_name, manager_phone, 1 if tip_pool else 0, float(tip_rate)))
         conn.commit()
         flash('Settings saved.', 'success')
     c.execute('SELECT * FROM venue_config WHERE id = 1')
