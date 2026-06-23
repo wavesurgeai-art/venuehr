@@ -714,7 +714,9 @@ def staff_detail(staff_id):
     _rows = {r['doc_type']: r['signed_at'] for r in c.fetchall()}
     _done = dict(_rows)
     if staff_member['agreement_status'] == 'signed':
-        _done.setdefault('agreement', None)
+        c.execute('SELECT signed_at FROM agreements WHERE staff_id = ? ORDER BY signed_at DESC LIMIT 1', (staff_id,))
+        _agr = c.fetchone()
+        _done['agreement'] = _agr['signed_at'] if _agr else None
     onboarding_docs = [{'key': s['key'], 'title': s['title'], 'done': s['key'] in _done,
                         'viewable': s['key'] in _rows, 'signed_at': _done.get(s['key'])}
                        for s in ONBOARDING_STEPS]
