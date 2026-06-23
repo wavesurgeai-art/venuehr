@@ -1859,24 +1859,10 @@ def venue_settings():
     conn.close()
     return render_template('admin_settings.html', settings=row, admin_name=session.get('admin_name'))
 
-def send_sms_alert(phone, message):
-    """Send an outbound SMS (uses Twilio if configured)."""
-    if not phone:
-        return
-    try:
-        from twilio.rest import Client
-        from twilio.twiml.messaging_response import MessagingResponse
-        if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER:
-            client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-            client.messages.create(body=message, from_=TWILIO_PHONE_NUMBER, to=phone)
-    except Exception:
-        app.logger.warning(f'Could not send SMS to {phone}')
-
-
-
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
 TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
+TWILIO_MESSAGING_SERVICE_SID = os.environ.get('TWILIO_MESSAGING_SERVICE_SID', '')
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────────
 
@@ -1889,17 +1875,30 @@ def get_manager_phone() -> str:
     return row['manager_phone'] if row and row['manager_phone'] else None
 
 def send_sms_alert(to_phone: str, message: str):
-    """Send an SMS alert (bypasses normal flow — for managers only)."""
+    """Send an outbound SMS via Twilio.
+
+    Prefers the approved A2P Messaging Service so traffic routes through the
+    registered 10DLC campaign. Falls back to the bare from-number if no
+    Messaging Service SID is set.
+    """
     if not to_phone or not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        app.logger.warning('SMS skipped: missing recipient or Twilio credentials')
         return
     try:
-        import requests
-        url = f'https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json'
-        auth = (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        data = {'From': TWILIO_PHONE_NUMBER, 'To': to_phone, 'Body': message}
-        requests.post(url, data=data, auth=auth, timeout=10)
-    except Exception:
-        app.logger.error('Failed to send SMS alert')
+        from twilio.rest import Client
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        kwargs = {'body': message, 'to': to_phone}
+        if TWILIO_MESSAGING_SERVICE_SID:
+            kwargs['messaging_service_sid'] = TWILIO_MESSAGING_SERVICE_SID
+        elif TWILIO_PHONE_NUMBER:
+            kwargs['from_'] = TWILIO_PHONE_NUMBER
+        else:
+            app.logger.warning('SMS skipped: no Messaging Service SID or from-number set')
+            return
+        msg = client.messages.create(**kwargs)
+        app.logger.info(f'SMS sent to {to_phone} sid={msg.sid}')
+    except Exception as e:
+        app.logger.error(f'Failed to send SMS to {to_phone}: {e}')
 
 # ─── Timesheet Handlers ──────────────────��──────────────────────────────────────
 
@@ -2258,8 +2257,12 @@ def sms_webhook():
         if not skip_validation and TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
             validator = RequestValidator(TWILIO_AUTH_TOKEN)
             signature = request.headers.get('X-Twilio-Signature', '')
-            url = request.url
+            # Behind Render's proxy, rebuild the exact public URL Twilio signed.
+            url = os.environ.get('TWILIO_WEBHOOK_URL', '').strip() or request.url
+            if url.startswith('http://'):
+                url = 'https://' + url[len('http://'):]
             if not validator.validate(url, request.form, signature):
+                app.logger.warning('Twilio signature validation failed')
                 return 'Forbidden', 403
 
         from_number = request.form.get('From', '')
