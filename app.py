@@ -1715,7 +1715,7 @@ def demo_mode():
         c.execute("SELECT id FROM staff WHERE agreement_status = 'signed'")
         for prow in c.fetchall():
             pid = prow['id']
-            ec, dd = {}, {}
+            ec, dd, w4 = {}, {}, {}
             c.execute("SELECT data_json FROM onboarding_documents WHERE staff_id = ? AND doc_type = 'emergency_contact'", (pid,))
             r = c.fetchone()
             if r and r['data_json']:
@@ -1724,10 +1724,17 @@ def demo_mode():
             r = c.fetchone()
             if r and r['data_json']:
                 dd = json.loads(r['data_json'])
+            c.execute("SELECT data_json FROM onboarding_documents WHERE staff_id = ? AND doc_type = 'w4'", (pid,))
+            r = c.fetchone()
+            if r and r['data_json']:
+                w4 = json.loads(r['data_json'])
+            tax_pref = w4.get('filing_status', '')
+            if w4.get('exempt') == 'yes':
+                tax_pref = (tax_pref + ' — Exempt').strip(' —')
             c.execute('''INSERT INTO staff_profiles
                          (staff_id, emergency_contact_name, emergency_contact_phone, emergency_contact_relationship,
-                          bank_name, bank_routing, bank_account, updated_at)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                          bank_name, bank_routing, bank_account, tax_withholding, updated_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                          ON CONFLICT (staff_id) DO UPDATE SET
                              emergency_contact_name = EXCLUDED.emergency_contact_name,
                              emergency_contact_phone = EXCLUDED.emergency_contact_phone,
@@ -1735,10 +1742,11 @@ def demo_mode():
                              bank_name = EXCLUDED.bank_name,
                              bank_routing = EXCLUDED.bank_routing,
                              bank_account = EXCLUDED.bank_account,
+                             tax_withholding = EXCLUDED.tax_withholding,
                              updated_at = EXCLUDED.updated_at''',
                       (pid, ec.get('contact_name', ''), ec.get('contact_phone', ''), ec.get('relationship', ''),
                        dd.get('bank_name', ''), dd.get('routing_number', ''), dd.get('account_number', ''),
-                       now.isoformat()))
+                       tax_pref, now.isoformat()))
     except Exception:
         pass
 
