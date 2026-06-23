@@ -266,6 +266,37 @@ ONBOARDING_STEPS = [
             {'name': 'relationship', 'label': 'Relationship to you', 'type': 'text', 'required': True},
         ],
     },
+    {
+        'key': 'license',
+        'title': 'Licenses & Certifications',
+        'subtitle': 'Add any work-related license or certification (optional)',
+        'body': (
+            "Use this step to record any work-related license or certification you hold. "
+            "Examples: an Indiana Alcohol & Tobacco Commission (ATC) Employee Permit if you serve or sell alcohol, "
+            "alcohol server training (TIPS, Learn2Serve, or the ATC's free course), a food handler card, or a security guard license.\n\n"
+            "In Indiana, anyone who serves or sells alcohol \u2014 and, as of July 2025, door security who check IDs \u2014 must "
+            "complete certified server training and hold an ATC Employee Permit within 120 days of hire. Unrestricted permits "
+            "(age 21+) are valid three years; restricted permits (age 18\u201320) about two years.\n\n"
+            "This information is optional. If you have nothing to add, leave the fields blank and continue. VenueHR records "
+            "what you enter for your venue's reference \u2014 it does not verify or issue any license."
+        ),
+        'ack': ('I have reviewed the information above and confirm it is accurate and complete. '
+                'If I have no license or certification to add, I am intentionally leaving the fields blank.'),
+        'signature': False,
+        'fields': [
+            {'name': 'license_type', 'label': 'License / certification type', 'type': 'select',
+             'options': ['Indiana ATC Employee Permit (Unrestricted, 21+)',
+                         'Indiana ATC Restricted Employee Permit (18-20)',
+                         'Alcohol Server Training (TIPS / Learn2Serve / ATC)',
+                         'Food Handler Certification',
+                         'Security Guard License',
+                         'Other'], 'required': False},
+            {'name': 'license_number', 'label': 'License / permit / certificate number', 'type': 'text', 'required': False},
+            {'name': 'license_state', 'label': 'Issuing state or authority', 'type': 'text', 'required': False,
+             'placeholder': 'e.g. IN - Alcohol & Tobacco Commission'},
+            {'name': 'license_expires', 'label': 'Expiration date (if any)', 'type': 'date', 'required': False},
+        ],
+    },
 ]
 
 ONBOARDING_STEP_KEYS = [s['key'] for s in ONBOARDING_STEPS]
@@ -907,6 +938,13 @@ def onboard(token):
                 'emergency_contact_name': field_data.get('contact_name', ''),
                 'emergency_contact_phone': field_data.get('contact_phone', ''),
                 'emergency_contact_relationship': field_data.get('relationship', ''),
+            })
+        elif step_key == 'license':
+            _upsert_profile(c, staff_member['id'], {
+                'license_type': field_data.get('license_type', ''),
+                'license_number': field_data.get('license_number', ''),
+                'license_state': field_data.get('license_state', ''),
+                'license_expires': field_data.get('license_expires', ''),
             })
 
         conn.commit()
@@ -1675,12 +1713,21 @@ def demo_mode():
                     'List A — U.S. Passport or Passport Card',
                     'List B + C — State ID + Birth Certificate']
         _rels = ['Spouse', 'Parent', 'Sibling', 'Partner']
-        c.execute("SELECT id, name, phone FROM staff WHERE agreement_status = 'signed'")
+        _lic_exp = ['2028-04-15', '2026-08-30', '2027-11-01', '2026-07-20', '2029-01-10']
+        c.execute("SELECT id, name, phone, role FROM staff WHERE agreement_status = 'signed'")
         for i, srow in enumerate(c.fetchall()):
             sid = srow['id']
             sname = srow['name'] or 'Staff Member'
             sphone = srow['phone'] or ''
             last4 = sphone[-4:] if len(sphone) >= 4 else '4821'
+            srole = srow['role'] or ''
+            if ('Bartender' in srole) or ('Security' in srole):
+                lic = {'license_type': 'Indiana ATC Employee Permit (Unrestricted, 21+)',
+                       'license_number': 'EP-' + str(100000 + i),
+                       'license_state': 'IN - Alcohol & Tobacco Commission',
+                       'license_expires': _lic_exp[i % len(_lic_exp)]}
+            else:
+                lic = {'license_type': '', 'license_number': '', 'license_state': '', 'license_expires': ''}
             # Agreement (separate table + dedicated viewer)
             c.execute('SELECT id FROM agreements WHERE staff_id = ?', (sid,))
             if not c.fetchone():
@@ -1702,6 +1749,7 @@ def demo_mode():
                 ('emergency_contact', {'contact_name': 'Emergency Contact',
                                        'contact_phone': '+1 317-555-0' + str(700 + i),
                                        'relationship': _rels[i % len(_rels)]}, None),
+                ('license', lic, None),
             ]
             for dtype, data, sig in packet:
                 c.execute('SELECT id FROM onboarding_documents WHERE staff_id = ? AND doc_type = ?', (sid, dtype))
@@ -1730,13 +1778,19 @@ def demo_mode():
             r = c.fetchone()
             if r and r['data_json']:
                 w4 = json.loads(r['data_json'])
+            lic = {}
+            c.execute("SELECT data_json FROM onboarding_documents WHERE staff_id = ? AND doc_type = 'license'", (pid,))
+            r = c.fetchone()
+            if r and r['data_json']:
+                lic = json.loads(r['data_json'])
             tax_pref = w4.get('filing_status', '')
             if w4.get('exempt') == 'yes':
                 tax_pref = (tax_pref + ' — Exempt').strip(' —')
             c.execute('''INSERT INTO staff_profiles
                          (staff_id, emergency_contact_name, emergency_contact_phone, emergency_contact_relationship,
-                          bank_name, bank_routing, bank_account, tax_withholding, updated_at)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          bank_name, bank_routing, bank_account, tax_withholding,
+                          license_type, license_number, license_state, license_expires, updated_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                          ON CONFLICT (staff_id) DO UPDATE SET
                              emergency_contact_name = EXCLUDED.emergency_contact_name,
                              emergency_contact_phone = EXCLUDED.emergency_contact_phone,
@@ -1745,10 +1799,15 @@ def demo_mode():
                              bank_routing = EXCLUDED.bank_routing,
                              bank_account = EXCLUDED.bank_account,
                              tax_withholding = EXCLUDED.tax_withholding,
+                             license_type = EXCLUDED.license_type,
+                             license_number = EXCLUDED.license_number,
+                             license_state = EXCLUDED.license_state,
+                             license_expires = EXCLUDED.license_expires,
                              updated_at = EXCLUDED.updated_at''',
                       (pid, ec.get('contact_name', ''), ec.get('contact_phone', ''), ec.get('relationship', ''),
                        dd.get('bank_name', ''), dd.get('routing_number', ''), dd.get('account_number', ''),
-                       tax_pref, now.isoformat()))
+                       tax_pref, lic.get('license_type', ''), lic.get('license_number', ''),
+                       lic.get('license_state', ''), lic.get('license_expires', ''), now.isoformat()))
     except Exception:
         pass
 
