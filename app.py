@@ -21,6 +21,10 @@ from urllib.parse import urlencode
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
+
+import logging
+logging.basicConfig(level=logging.INFO)
+app.logger.setLevel(logging.INFO)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 app.config['UPLOAD_FOLDER'] = '/home/team/shared/static/uploads'
@@ -809,11 +813,27 @@ def view_onboarding_doc(staff_id, doc_type):
 def resend_link(staff_id):
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT onboarding_token FROM staff WHERE id = ?', (staff_id,))
+    c.execute('SELECT name, email, onboarding_token FROM staff WHERE id = ?', (staff_id,))
     row = c.fetchone()
     if row:
         token = row['onboarding_token']
-        flash(f'Onboarding link: {request.host_url}onboard/{token}', 'success')
+        onboarding_link = f'{request.host_url}onboard/{token}'
+        if row['email']:
+            venue_name = get_venue_name()
+            email_body = f"""Hi {row['name']},
+
+        Here is your onboarding link for {venue_name}:
+        {onboarding_link}
+
+        This link will take you to your Staff Uniform & Professional Conduct Agreement and the rest of your onboarding documents. If you have any questions, please contact your manager.
+        """
+            sent = send_email(row['email'], f'Your {venue_name} Onboarding Link', email_body)
+            if sent:
+                flash(f"Onboarding link emailed to {row['email']}.", 'success')
+            else:
+                flash(f"Could not email {row['email']} - link: {onboarding_link}", 'error')
+        else:
+            flash(f'Onboarding link: {onboarding_link}', 'success')
     conn.close()
     return redirect(url_for('staff_list'))
 
