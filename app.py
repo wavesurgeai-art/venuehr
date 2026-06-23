@@ -1660,18 +1660,53 @@ def demo_mode():
     except Exception:
         pass
 
-    # ── Sign agreements for "signed" staff ───────────────────────────────────
+   # ── Sign agreements + complete full onboarding packet for "signed" staff ──
     try:
-        c.execute("SELECT id FROM staff WHERE agreement_status = 'signed'")
-        signed_staff_ids = [row['id'] for row in c.fetchall()]
-        for staff_id in signed_staff_ids:
-            c.execute('SELECT id FROM agreements WHERE staff_id = ?', (staff_id,))
+        demo_sig = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSczMjAnIGhlaWdodD0nOTAnIHZpZXdCb3g9JzAgMCAzMjAgOTAnPjxyZWN0IHdpZHRoPSczMjAnIGhlaWdodD0nOTAnIGZpbGw9J3doaXRlJy8+PHBhdGggZD0nTTE4IDYyIEM0MCAyMCwgNTIgNzgsIDcwIDQ2IFMxMDQgMTgsIDEyMCA1NCBDMTMyIDgwLCAxNDggMzAsIDE2MiA1MiBDMTc2IDcyLCAxOTYgMjgsIDIxNCA1MCBDMjI4IDY2LCAyNDYgMzQsIDI2MiA1MiBDMjc2IDY2LCAyOTIgNDQsIDMwNCA1MCcgZmlsbD0nbm9uZScgc3Ryb2tlPScjMWYyOTM3JyBzdHJva2Utd2lkdGg9JzIuNCcgc3Ryb2tlLWxpbmVjYXA9J3JvdW5kJy8+PHBhdGggZD0nTTE1MCA3MCBDMTkwIDY2LCAyNDAgNjYsIDMwMCA2OCcgZmlsbD0nbm9uZScgc3Ryb2tlPScjMWYyOTM3JyBzdHJva2Utd2lkdGg9JzEuNCcgc3Ryb2tlLWxpbmVjYXA9J3JvdW5kJyBvcGFjaXR5PScwLjcnLz48L3N2Zz4="
+        _filings = ['Single or Married filing separately',
+                    'Married filing jointly or Qualifying surviving spouse',
+                    'Head of household']
+        _citizen = ['A citizen of the United States',
+                    'A citizen of the United States',
+                    'A lawful permanent resident']
+        _id_docs = ["List B + C — Driver's License + Social Security Card",
+                    'List A — U.S. Passport or Passport Card',
+                    'List B + C — State ID + Birth Certificate']
+        _rels = ['Spouse', 'Parent', 'Sibling', 'Partner']
+        c.execute("SELECT id, name, phone FROM staff WHERE agreement_status = 'signed'")
+        for i, srow in enumerate(c.fetchall()):
+            sid = srow['id']
+            sname = srow['name'] or 'Staff Member'
+            sphone = srow['phone'] or ''
+            last4 = sphone[-4:] if len(sphone) >= 4 else '4821'
+            # Agreement (separate table + dedicated viewer)
+            c.execute('SELECT id FROM agreements WHERE staff_id = ?', (sid,))
             if not c.fetchone():
-                agreement_id = str(uuid.uuid4())
                 c.execute("""INSERT INTO agreements (id, staff_id, signed_at, ip_address, signature_image, agreement_text)
-                               VALUES (?, ?, ?, '127.0.0.1', 'demo_signature.png', ?)""",
-                           (agreement_id, staff_id, now.isoformat(),
+                               VALUES (?, ?, ?, '127.0.0.1', ?, ?)""",
+                           (str(uuid.uuid4()), sid, now.isoformat(), demo_sig,
                             'Staff Uniform & Professional Conduct Agreement — Willowmere Gardens'))
+            # Remaining five wizard documents (full demo packet)
+            packet = [
+                ('handbook', {}, demo_sig),
+                ('direct_deposit', {'account_holder': sname, 'bank_name': 'First Midwest Bank',
+                                    'account_type': 'Checking', 'routing_number': '071000013',
+                                    'account_number': 'xxxxxx' + last4}, demo_sig),
+                ('w4', {'filing_status': _filings[i % len(_filings)], 'multiple_jobs': 'no',
+                        'dependents_amount': '0.00', 'other_income': '0.00', 'deductions': '0.00',
+                        'extra_withholding': '0.00', 'exempt': 'no'}, demo_sig),
+                ('i9', {'citizenship_status': _citizen[i % len(_citizen)],
+                        'id_documents': _id_docs[i % len(_id_docs)]}, demo_sig),
+                ('emergency_contact', {'contact_name': 'Emergency Contact',
+                                       'contact_phone': '+1 317-555-0' + str(700 + i),
+                                       'relationship': _rels[i % len(_rels)]}, None),
+            ]
+            for dtype, data, sig in packet:
+                c.execute('SELECT id FROM onboarding_documents WHERE staff_id = ? AND doc_type = ?', (sid, dtype))
+                if not c.fetchone():
+                    c.execute('''INSERT INTO onboarding_documents (id, staff_id, doc_type, signed_at, ip_address, signature_image, data_json)
+                                 VALUES (?, ?, ?, ?, '127.0.0.1', ?, ?)''',
+                              (str(uuid.uuid4()), sid, dtype, now.isoformat(), sig, json.dumps(data)))
     except Exception:
         pass
 
