@@ -63,7 +63,8 @@ def send_email(to, subject, body):
 
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            app.logger.info(f'Email sent to {to}: {subject} (Resend)')
+            result = json.loads(resp.read().decode() or '{}')
+            app.logger.info(f"Email sent to {to}: {subject} (Resend id={result.get('id', 'n/a')})")
             return True
     except urllib.error.HTTPError as e:
         error_body = e.read().decode()[:200]
