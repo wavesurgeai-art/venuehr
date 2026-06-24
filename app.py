@@ -1639,6 +1639,32 @@ def demo_mode():
     conn = get_db()
     c = conn.cursor()
 
+    # ── Idempotent reset ───────────────────────────────────────────────────────
+    # /demo previously stacked a NEW random-UUID "Johnson Wedding Reception" event
+    # (plus its tips/staffing/timesheets) on every run -> duplicate events all
+    # showing the same $182 pool. Clear prior demo event(s) and everything scoped
+    # to them first, so re-running /demo resets to ONE clean event instead of N.
+    # Scoped by event name -> any real events created via the UI are preserved.
+    try:
+        c.execute("SELECT id FROM events WHERE name = ?", ('Johnson Wedding Reception',))
+        _demo_event_ids = [r['id'] for r in c.fetchall()]
+    except Exception:
+        _demo_event_ids = []
+    if _demo_event_ids:
+        _ph = ','.join(['?'] * len(_demo_event_ids))
+        for _tbl in ('tip_distributions', 'tip_entries', 'timesheet_entries',
+                     'event_staffing', 'shift_swap_requests',
+                     'performance_ratings', 'incidents'):
+            try:
+                c.execute(f"DELETE FROM {_tbl} WHERE event_id IN ({_ph})", _demo_event_ids)
+            except Exception:
+                pass
+        try:
+            c.execute(f"DELETE FROM events WHERE id IN ({_ph})", _demo_event_ids)
+        except Exception:
+            pass
+        conn.commit()
+
     # ── Seed demo staff ────────────────────────────────────────────────────────
     staff_records = [
         # Venue staff (admin)
