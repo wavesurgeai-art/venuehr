@@ -2283,7 +2283,7 @@ def sms_webhook():
                 answer, next_step = HELP_TEXT, None
             elif upper_body == 'STATUS':
                 answer, next_step = get_onboarding_status(from_number)
-            elif upper_body == 'QUIT':
+            elif upper_body in ('EXIT', 'QUIT'):
                 answer, next_step = quit_onboarding(from_number)
             else:
                 answer, next_step = handle_onboarding_state(from_number, body, row)
@@ -2293,7 +2293,7 @@ def sms_webhook():
             answer, next_step = HELP_TEXT, None
         elif upper_body == 'STATUS':
             answer, next_step = get_onboarding_status(from_number)
-        elif upper_body == 'QUIT':
+        elif upper_body in ('EXIT', 'QUIT'):
             answer, next_step = quit_onboarding(from_number)
         elif upper_body in ('IN', 'OUT'):
             if upper_body == 'IN':
@@ -2339,13 +2339,13 @@ def sms_webhook():
 
 # ─── Onboarding State Machine ───────────────────────────────────────────────────
 
-STAGES = ['WELCOME', 'START_RECEIVED', 'DOB_VERIFIED', 'BASIC_INFO', 'TAX_INFO', 'COMPLIANCE_PHOTOS', 'PAYROLL', 'COMPLETE']
+STAGES = ['WELCOME', 'START_RECEIVED', 'DOB_VERIFIED', 'BASIC_INFO', 'TAX_INFO', 'PAYROLL', 'COMPLETE']
 
 HELP_TEXT = ("Commands:\n"
              "START [DOB] - Begin onboarding (e.g. START 01/15/2000)\n"
              "STATUS - See your onboarding progress\n"
              "BACK - Go to previous step\n"
-             "QUIT - Exit and save progress\n"
+             "EXIT - Exit and save progress\n"
              "For other questions, I'll try to find an FAQ answer!")
 
 def get_venue_name() -> str:
@@ -2437,7 +2437,7 @@ def handle_onboarding_state(phone: str, body: str, row):
     upper_body = body.upper()
 
     # Global commands
-    if upper_body == 'QUIT':
+    if upper_body in ('EXIT', 'QUIT'):
         return quit_onboarding(phone)
 
     if upper_body == 'STATUS':
@@ -2455,9 +2455,6 @@ def handle_onboarding_state(phone: str, body: str, row):
 
     elif step == 'TAX_INFO':
         return collect_tax_info(phone, body, data, assigned_role, dob)
-
-    elif step == 'COMPLIANCE_PHOTOS':
-        return collect_compliance_photos(phone, body, data, assigned_role, dob)
 
     elif step == 'PAYROLL':
         return collect_payroll(phone, body, data, assigned_role, dob)
@@ -2482,24 +2479,32 @@ def collect_tax_info(phone, body, data, role, dob):
     if '@' not in email or '.' not in email:
         return ("That doesn't look like a valid email. Please reply with a valid email address:"), 'TAX_INFO'
     data['email'] = email
-    data['step'] = 'COMPLIANCE_PHOTOS'
-    save_onboarding_state(phone, 'COMPLIANCE_PHOTOS', data)
-    return ("Great!\n\n"
-            "Next, Compliance Photos.\n\n"
-            "Please reply with a photo of yourself in your work uniform "
-            "(solid black button-down shirt, black dress slacks, black non-slip shoes). "
-            "This will be used for your staff ID badge."), 'COMPLIANCE_PHOTOS'
-
-def collect_compliance_photos(phone, body, data, role, dob):
-    # Body contains media URL if photo was sent, or a text response
-    num_photos = data.get('photo_count', 0) + 1
-    data['photo_count'] = num_photos
     data['step'] = 'PAYROLL'
     save_onboarding_state(phone, 'PAYROLL', data)
-    return ("Thanks! Your compliance photo has been received.\n\n"
+    return ("Great!\n\n"
             "Finally, Payroll.\n\n"
             "Do you have Direct Deposit set up?\n\n"
             "Reply YES if you want to provide bank info now, or REPLY LATER to skip."), 'PAYROLL'
+
+# ─── PARKED: SMS compliance-photo capture (badge photo via MMS) ───────────────────
+# Removed from the live onboarding flow Jun 23. The previous handler was a STUB:
+# it replied "photo received" without ever reading, downloading, or storing an
+# image. Real capture is a future build (read NumMedia / MediaUrl0 from the
+# inbound webhook, fetch from Twilio with auth, store base64 in Postgres like the
+# signed onboarding docs). To re-enable: restore 'COMPLIANCE_PHOTOS' in STAGES /
+# step_order / status maps, point collect_tax_info's next step back to it, and
+# implement the real handler below. See Master Brief backlog entry.
+#
+# def collect_compliance_photos(phone, body, data, role, dob):
+#     # Body contains media URL if photo was sent, or a text response
+#     num_photos = data.get('photo_count', 0) + 1
+#     data['photo_count'] = num_photos
+#     data['step'] = 'PAYROLL'
+#     save_onboarding_state(phone, 'PAYROLL', data)
+#     return ("Thanks! Your compliance photo has been received.\n\n"
+#             "Finally, Payroll.\n\n"
+#             "Do you have Direct Deposit set up?\n\n"
+#             "Reply YES if you want to provide bank info now, or REPLY LATER to skip."), 'PAYROLL'
 
 def collect_payroll(phone, body, data, role, dob):
     upper = body.strip().upper()
@@ -2516,7 +2521,7 @@ def collect_payroll(phone, body, data, role, dob):
 
 def handle_back(phone, step, data):
     """Go back one step in the onboarding flow."""
-    step_order = ['WELCOME', 'START_RECEIVED', 'DOB_VERIFIED', 'BASIC_INFO', 'TAX_INFO', 'COMPLIANCE_PHOTOS', 'PAYROLL', 'COMPLETE']
+    step_order = ['WELCOME', 'START_RECEIVED', 'DOB_VERIFIED', 'BASIC_INFO', 'TAX_INFO', 'PAYROLL', 'COMPLETE']
     try:
         idx = step_order.index(step)
     except ValueError:
@@ -2557,21 +2562,19 @@ def get_onboarding_status(phone):
         'DOB_VERIFIED': 'DOB Verified',
         'BASIC_INFO': 'Basic Info',
         'TAX_INFO': 'Tax Info',
-        'COMPLIANCE_PHOTOS': 'Compliance Photos',
         'PAYROLL': 'Payroll',
     }
 
     status = f"Step: {steps_display.get(step, step)}\nRole: {role}\n\n"
     remaining = {
-        'DOB_VERIFIED': 'Basic Info, Tax Documents, Compliance, Payroll',
-        'BASIC_INFO': 'Tax Documents, Compliance, Payroll',
-        'TAX_INFO': 'Compliance, Payroll',
-        'COMPLIANCE_PHOTOS': 'Payroll',
+        'DOB_VERIFIED': 'Basic Info, Tax Documents, Payroll',
+        'BASIC_INFO': 'Tax Documents, Payroll',
+        'TAX_INFO': 'Payroll',
         'PAYROLL': 'Finish up!',
     }
     if step in remaining:
         status += f"Remaining: {remaining[step]}\n\n"
-    status += "Reply BACK to go to previous step, or QUIT to save and exit."
+    status += "Reply BACK to go to previous step, or EXIT to save and exit."
 
     return status, None
 
