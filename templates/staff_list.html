@@ -59,34 +59,34 @@
 
 <!-- Staff Table -->
 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-    <table class="w-full">
+    <table id="staff-table" class="w-full">
         <thead class="bg-gray-50 border-b border-gray-200">
             <tr>
-                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Name</th>
-                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Role</th>
-                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
-                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Hire Date</th>
-                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th data-sortable data-col="0" class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:bg-gray-100 transition">Name<span class="sort-arrow"></span></th>
+                <th data-sortable data-col="1" class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:bg-gray-100 transition">Role<span class="sort-arrow"></span></th>
+                <th data-sortable data-col="2" class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:bg-gray-100 transition">Type<span class="sort-arrow"></span></th>
+                <th data-sortable data-col="3" class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:bg-gray-100 transition">Hire Date<span class="sort-arrow"></span></th>
+                <th data-sortable data-col="4" class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:bg-gray-100 transition">Status<span class="sort-arrow"></span></th>
                 <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-200">
             {% for s in staff %}
-            <tr>
-                <td class="px-6 py-4">
+            <tr data-row>
+                <td class="px-6 py-4" data-sort="{{ s.name }}">
                     <div class="font-medium text-gray-900">{{ s.name }}</div>
                     <div class="text-sm text-gray-500">{{ s.email }}</div>
                 </td>
-                <td class="px-6 py-4 text-gray-700 capitalize">{{ s.role }}</td>
-                <td class="px-6 py-4">
+                <td class="px-6 py-4 text-gray-700 capitalize" data-sort="{{ s.role }}">{{ s.role }}</td>
+                <td class="px-6 py-4" data-sort="{{ s.employment_type }}">
                     {% if s.employment_type == 'contractor' %}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">Contractor</span>
                     {% else %}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">W-2</span>
                     {% endif %}
                 </td>
-                <td class="px-6 py-4 text-gray-700">{{ s.hire_date or '—' }}</td>
-                <td class="px-6 py-4">
+                <td class="px-6 py-4 text-gray-700" data-sort="{{ s.hire_date or '' }}">{{ s.hire_date or '—' }}</td>
+                <td class="px-6 py-4" data-sort="{{ s.agreement_status }}">
                     {% if s.agreement_status == 'signed' %}
                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Signed</span>
                     {% elif s.agreement_status == 'pending' %}
@@ -109,10 +109,69 @@
             </tr>
             {% else %}
             <tr>
-                <td colspan="5" class="px-6 py-12 text-center text-gray-500">No staff members yet. Add your first staff member above.</td>
+                <td colspan="6" class="px-6 py-12 text-center text-gray-500">No staff members yet. Add your first staff member above.</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
+
+<script>
+(function () {
+    var table = document.getElementById('staff-table');
+    if (!table) return;
+    var tbody = table.querySelector('tbody');
+    var headers = table.querySelectorAll('th[data-sortable]');
+    var currentCol = null;
+    var asc = true;
+
+    function cellValue(row, col) {
+        var cell = row.children[col];
+        if (!cell) return '';
+        var v = cell.getAttribute('data-sort');
+        if (v === null) v = cell.textContent;
+        return v.trim().toLowerCase();
+    }
+
+    function sortBy(col) {
+        var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr[data-row]'));
+        if (rows.length < 2) { return; }
+        if (currentCol === col) { asc = !asc; } else { currentCol = col; asc = true; }
+        rows.sort(function (a, b) {
+            var x = cellValue(a, col);
+            var y = cellValue(b, col);
+            var xEmpty = (x === '' || x === '—');
+            var yEmpty = (y === '' || y === '—');
+            if (xEmpty && !yEmpty) return 1;   // blanks always sink to the bottom
+            if (yEmpty && !xEmpty) return -1;
+            var cmp = x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' });
+            return asc ? cmp : -cmp;
+        });
+        rows.forEach(function (r) { tbody.appendChild(r); });
+        updateArrows();
+    }
+
+    function updateArrows() {
+        headers.forEach(function (h) {
+            var arrow = h.querySelector('.sort-arrow');
+            var col = parseInt(h.getAttribute('data-col'), 10);
+            if (col === currentCol) {
+                arrow.textContent = asc ? ' \u25B2' : ' \u25BC';
+                h.classList.add('text-gray-900');
+                h.classList.remove('text-gray-500');
+            } else {
+                arrow.textContent = '';
+                h.classList.add('text-gray-500');
+                h.classList.remove('text-gray-900');
+            }
+        });
+    }
+
+    headers.forEach(function (h) {
+        h.addEventListener('click', function () {
+            sortBy(parseInt(h.getAttribute('data-col'), 10));
+        });
+    });
+})();
+</script>
 {% endblock %}
