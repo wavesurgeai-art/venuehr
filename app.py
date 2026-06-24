@@ -406,8 +406,14 @@ def init_db():
         venue_name TEXT NOT NULL DEFAULT 'Our Venue',
         manager_phone TEXT DEFAULT '',
         tip_pool_enabled INTEGER DEFAULT 0,
-        tipout_rate REAL DEFAULT 0.20
+        tipout_rate REAL DEFAULT 0.20,
+        tip_model TEXT NOT NULL DEFAULT 'equal_pool'
     )''')
+    # Existing-DB migration: add tip_model if venue_config predates this column.
+    try:
+        c.execute("ALTER TABLE venue_config ADD COLUMN tip_model TEXT NOT NULL DEFAULT 'equal_pool'")
+    except Exception:
+        pass
     c.execute('''CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
         date TEXT NOT NULL,
@@ -467,6 +473,22 @@ def init_db():
         staff_count INTEGER NOT NULL,
         calculated_at TEXT NOT NULL,
         FOREIGN KEY (event_id) REFERENCES events(id)
+    )''')
+    # Per-staff tip distribution rows (equal-pool, hours-weighted). Replaces the
+    # event-summary tipout_records (orphaned, lacked staff_id). One row per staffer
+    # per event = their calculated share of that event's pooled tips.
+    c.execute('''CREATE TABLE IF NOT EXISTS tip_distributions (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        staff_id TEXT NOT NULL,
+        tip_model TEXT NOT NULL DEFAULT 'equal_pool',
+        hours_used REAL NOT NULL DEFAULT 0,
+        hours_imputed INTEGER NOT NULL DEFAULT 0,
+        pool_total REAL NOT NULL DEFAULT 0,
+        share_amount REAL NOT NULL DEFAULT 0,
+        calculated_at TEXT NOT NULL,
+        FOREIGN KEY (event_id) REFERENCES events(id),
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS incidents (
         id TEXT PRIMARY KEY,
@@ -1311,16 +1333,65 @@ def admin_incidents():
 @app.route('/admin/tips', methods=['GET'])
 @login_required
 def admin_tips():
-    """View tip entries summary."""
+    """Tip dashboard: raw tip log + per-event pools with hours-weighted splits."""
     conn = get_db()
     c = conn.cursor()
-    c.execute('''SELECT ti.id, ti.amount, ti.recorded_at, s.name, s.role
+
+    # Raw tip log (unchanged) -- recent individual TIP submissions.
+    c.execute('''SELECT ti.id, ti.amount, ti.recorded_at, ti.event_id, s.name, s.role
                  FROM tip_entries ti
                  LEFT JOIN staff s ON ti.staff_id = s.id
                  ORDER BY ti.recorded_at DESC LIMIT 50''')
     tips = c.fetchall()
+
+    # Per-event pools: every event that has at least one logged tip.
+    c.execute('''SELECT e.id, e.name, e.date,
+                        COALESCE(SUM(ti.amount), 0) AS pool_total,
+                        COUNT(ti.id) AS tip_count
+                 FROM events e
+                 JOIN tip_entries ti ON ti.event_id = e.id
+                 GROUP BY e.id, e.name, e.date
+                 ORDER BY e.date DESC''')
+    pool_rows = c.fetchall()
+
+    # Already-calculated distributions, grouped by event for display.
+    c.execute('''SELECT td.event_id, td.staff_id, td.hours_used, td.hours_imputed,
+                        td.share_amount, td.pool_total, td.calculated_at,
+                        s.name, s.role
+                 FROM tip_distributions td
+                 LEFT JOIN staff s ON td.staff_id = s.id
+                 ORDER BY td.share_amount DESC''')
+    dist_rows = c.fetchall()
     conn.close()
-    return render_template('admin_tips.html', tips=tips, admin_name=session.get('admin_name'))
+
+    distributions = {}
+    for r in dist_rows:
+        distributions.setdefault(r['event_id'], []).append(r)
+
+    events = []
+    for p in pool_rows:
+        events.append({
+            'id': p['id'], 'name': p['name'], 'date': p['date'],
+            'pool_total': p['pool_total'], 'tip_count': p['tip_count'],
+            'distribution': distributions.get(p['id'], []),
+        })
+
+    return render_template('admin_tips.html', tips=tips, events=events,
+                           admin_name=session.get('admin_name'))
+
+
+@app.route('/admin/tips/distribute/<event_id>', methods=['POST'])
+@login_required
+def admin_tips_distribute(event_id):
+    """Calculate (or recalculate) the hours-weighted equal-pool split for an event."""
+    result = distribute_event_tips(event_id)
+    if result['ok']:
+        basis = 'split by hours worked' if result['basis'] == 'hours' else 'split evenly (no hours logged)'
+        flash(f"Tip pool of ${result['pool_total']:.2f} {basis} across "
+              f"{len(result['rows'])} staff.", 'success')
+    else:
+        flash(result['error'] or 'Could not calculate tip split.', 'error')
+    return redirect(url_for('admin_tips'))
 
 @app.route('/admin/payroll_export')
 @login_required
@@ -2044,6 +2115,129 @@ def handle_break_response(phone: str, body: str):
 
 # ─── Tip Handler ────────────────────────────────────────────────────────────────
 
+# --- Tip distribution models -------------------------------------------------
+# equal_pool is implemented (hours-weighted, see distribute_event_tips).
+# The other two are roadmap stubs so the venue-config dropdown is a drop-in later
+# (same pattern as the planned VERTICALS block). Do not wire them until a pilot
+# pulls them -- during a demo we say "configurable to however your venue splits
+# tips" and show the working equal-pool model.
+TIP_MODELS = {
+    'equal_pool': {
+        'label': 'Equal Pool (hours-weighted)',
+        'live': True,
+        'desc': "All tips for an event pool together and split across the crew "
+                "weighted by hours worked. Anyone without a logged timesheet is "
+                "counted at the crew's average hours.",
+    },
+    'tipout_pct': {
+        'label': 'Tipout % to Support Staff',
+        'live': False,
+        'desc': "Tipped earners contribute a set percentage to a support pool. "
+                "Roadmap -- not yet built.",
+    },
+    'keep_own': {
+        'label': 'Keep Your Own',
+        'live': False,
+        'desc': "Each staffer keeps the tips they personally logged. "
+                "Roadmap -- not yet built.",
+    },
+}
+
+
+def distribute_event_tips(event_id):
+    """Compute hours-weighted equal-pool shares for one event and persist them
+    into tip_distributions (replacing any prior calc for that event).
+
+    Returns dict: {ok, pool_total, rows:[...], basis ('hours'|'even'|'none'), error}.
+    Rule (per Jeff's call): staff missing timesheet hours are imputed at the
+    crew average so nobody who reported tips lands at $0; if NOBODY has hours,
+    the event splits evenly across participants.
+    """
+    conn = get_db()
+    c = conn.cursor()
+
+    # Pool = sum of all tips logged for this event.
+    c.execute('SELECT COALESCE(SUM(amount), 0) AS pool FROM tip_entries WHERE event_id = ?',
+              (event_id,))
+    pool_total = float(c.fetchone()['pool'] or 0)
+
+    # Participants = confirmed crew on the event UNION anyone who logged a tip for it.
+    c.execute('''SELECT DISTINCT s.id AS staff_id, s.name, s.role
+                 FROM staff s
+                 WHERE s.id IN (
+                     SELECT staff_id FROM event_staffing
+                     WHERE event_id = ? AND confirmed = 1
+                     UNION
+                     SELECT staff_id FROM tip_entries WHERE event_id = ?
+                 )''', (event_id, event_id))
+    participants = c.fetchall()
+
+    if pool_total <= 0 or not participants:
+        conn.close()
+        return {'ok': False, 'pool_total': pool_total, 'rows': [],
+                'basis': 'none',
+                'error': 'No tips logged for this event yet.' if pool_total <= 0
+                         else 'No confirmed crew or tip-loggers on this event.'}
+
+    # Hours per participant (sum timesheet total_hours for this event).
+    hours = {}
+    for p in participants:
+        c.execute('SELECT COALESCE(SUM(total_hours), 0) AS h FROM timesheet_entries '
+                  'WHERE staff_id = ? AND event_id = ?', (p['staff_id'], event_id))
+        h = float(c.fetchone()['h'] or 0)
+        hours[p['staff_id']] = h if h > 0 else None
+
+    real = [h for h in hours.values() if h is not None]
+    if real:
+        avg = sum(real) / len(real)
+        basis = 'hours'
+    else:
+        avg = None
+        basis = 'even'
+
+    # Build weights (impute missing at avg; if nobody has hours, weight 1 each).
+    weights, imputed = {}, {}
+    for sid, h in hours.items():
+        if h is not None:
+            weights[sid] = h
+            imputed[sid] = False
+        elif avg is not None:
+            weights[sid] = avg
+            imputed[sid] = True
+        else:
+            weights[sid] = 1.0
+            imputed[sid] = True
+
+    total_w = sum(weights.values())
+    now = datetime.utcnow().isoformat()
+
+    # Persist: clear any prior calc for this event, then insert fresh rows.
+    c.execute('DELETE FROM tip_distributions WHERE event_id = ?', (event_id,))
+
+    rows, running = [], 0.0
+    for i, p in enumerate(participants):
+        sid = p['staff_id']
+        w = weights[sid]
+        if i < len(participants) - 1:
+            share = round(pool_total * (w / total_w), 2)
+            running += share
+        else:
+            share = round(pool_total - running, 2)  # last row absorbs rounding remainder
+        c.execute('INSERT INTO tip_distributions '
+                  '(id, event_id, staff_id, tip_model, hours_used, hours_imputed, '
+                  'pool_total, share_amount, calculated_at) '
+                  "VALUES (?, ?, ?, 'equal_pool', ?, ?, ?, ?, ?)",
+                  (str(uuid.uuid4()), event_id, sid, round(w, 2),
+                   1 if imputed[sid] else 0, pool_total, share, now))
+        rows.append({'staff_id': sid, 'name': p['name'], 'role': p['role'],
+                     'hours': round(w, 2), 'imputed': imputed[sid], 'share': share})
+
+    conn.commit()
+    conn.close()
+    return {'ok': True, 'pool_total': round(pool_total, 2), 'rows': rows,
+            'basis': basis, 'error': None}
+
+
 def handle_tip(phone: str, body: str):
     """Handle 'TIP [amount]' SMS command."""
     m = re.match(r'^TIP\s+(\d+(?:\.\d{1,2})?)', body.strip(), re.IGNORECASE)
@@ -2077,11 +2271,11 @@ def handle_tip(phone: str, body: str):
     event_id = event['id'] if event else None
     event_name = event['name'] if event else 'No event'
 
-    # Get tip pool config
-    c.execute('SELECT tip_pool_enabled, tipout_rate FROM venue_settings WHERE id=1')
+    # Get tip pool config (single source of truth = venue_config; venue_settings retired)
+    c.execute('SELECT tip_pool_enabled, tip_model FROM venue_config WHERE id=1')
     cfg = c.fetchone()
     tip_pool = cfg['tip_pool_enabled'] if cfg else 0
-    tipout_rate = cfg['tipout_rate'] if cfg else 0.0
+    tip_model = cfg['tip_model'] if cfg else 'equal_pool'
     conn.close()
 
     tip_id = str(uuid.uuid4())
@@ -2094,9 +2288,11 @@ def handle_tip(phone: str, body: str):
     conn.close()
 
     msg = (f"✅ Tip recorded: ${amount:.2f}\nEvent: {event_name}\nStaff: {staff_name}")
-    if tip_pool and event_id:
-        share = round(amount * (tipout_rate / 100), 2)
-        msg += f"\n(Tip pool active: ${share:.2f} auto-calculated for tipout)"
+    if tip_pool and event_id and tip_model == 'equal_pool':
+        msg += ("\nAdded to the event tip pool — your final share is split by "
+                "hours worked and calculated at event close.")
+    elif tip_pool and event_id:
+        msg += "\nAdded to the event tip pool."
     return msg, None
 
 # ─── Incident Handler ──────────────────────────────────────────────────────────
