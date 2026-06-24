@@ -3,32 +3,114 @@
 {% block title %}Tips — VenueHR{% endblock %}
 
 {% block content %}
-<h1 class="text-2xl font-bold text-gray-900 mb-6">Tip Reports</h1>
+<h1 class="text-2xl font-bold text-gray-900 mb-2">Tip Reports</h1>
+<p class="text-sm text-gray-500 mb-6">Tips pool per event and split across the crew, weighted by hours worked. Staff without a logged timesheet are counted at the crew average.</p>
 
-<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-    {% if tips %}
-    <table class="w-full text-sm">
-        <thead>
-            <tr class="text-left text-gray-500 border-b">
-                <th class="pb-3">Staff</th>
-                <th class="pb-3">Role</th>
-                <th class="pb-3">Amount</th>
-                <th class="pb-3">Date</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for tip in tips %}
-            <tr class="border-b">
-                <td class="py-3">{{ tip.name or 'Unknown' }}</td>
-                <td class="py-3 capitalize">{{ tip.role or 'N/A' }}</td>
-                <td class="py-3">${{ "%.2f"|format(tip.amount) }}</td>
-                <td class="py-3">{{ tip.recorded_at }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+    <div class="mb-4 px-4 py-3 rounded-lg text-sm {{ 'bg-green-50 text-green-800 border border-green-200' if category == 'success' else 'bg-red-50 text-red-800 border border-red-200' }}">
+      {{ message }}
+    </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<!-- Per-event tip pools -->
+<div class="mb-8">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Event Tip Pools</h2>
+    {% if events %}
+    <div class="space-y-4">
+        {% for ev in events %}
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+            <div class="flex items-start justify-between flex-wrap gap-3">
+                <div>
+                    <h3 class="font-semibold text-gray-900">{{ ev.name }}</h3>
+                    <p class="text-sm text-gray-500">{{ ev.date }} &middot; {{ ev.tip_count }} tip{{ '' if ev.tip_count == 1 else 's' }} logged</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-2xl font-bold text-gray-900">${{ "%.2f"|format(ev.pool_total) }}</p>
+                    <p class="text-xs text-gray-500 uppercase tracking-wide">Pool Total</p>
+                </div>
+            </div>
+
+            <div class="mt-4 flex items-center gap-3">
+                <form method="POST" action="{{ url_for('admin_tips_distribute', event_id=ev.id) }}">
+                    <button type="submit"
+                            class="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 transition">
+                        {{ 'Recalculate Split' if ev.distribution else 'Calculate Split' }}
+                    </button>
+                </form>
+                {% if ev.distribution %}
+                <span class="text-xs text-gray-500">Last calculated {{ ev.distribution[0].calculated_at[:16]|replace('T', ' ') }}</span>
+                {% endif %}
+            </div>
+
+            {% if ev.distribution %}
+            <div class="mt-4 border-t border-gray-100 pt-4">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-gray-500 border-b">
+                            <th class="pb-2">Staff</th>
+                            <th class="pb-2">Role</th>
+                            <th class="pb-2">Hours</th>
+                            <th class="pb-2 text-right">Share</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for d in ev.distribution %}
+                        <tr class="border-b border-gray-50">
+                            <td class="py-2">{{ d.name or 'Unknown' }}</td>
+                            <td class="py-2 capitalize text-gray-600">{{ d.role or 'N/A' }}</td>
+                            <td class="py-2 text-gray-600">
+                                {{ "%.1f"|format(d.hours_used) }}h
+                                {% if d.hours_imputed %}<span class="ml-1 text-xs text-amber-600" title="No timesheet logged — counted at crew average">(avg)</span>{% endif %}
+                            </td>
+                            <td class="py-2 text-right font-medium text-gray-900">${{ "%.2f"|format(d.share_amount) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
     {% else %}
-    <p class="text-gray-500 text-center py-8">No tip entries yet. Staff can report tips via SMS.</p>
+    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        <p class="text-gray-500 text-center py-8">No event tip pools yet. Tips appear here once staff report them via SMS for a scheduled event.</p>
+    </div>
     {% endif %}
+</div>
+
+<!-- Raw tip log -->
+<div>
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Recent Tip Log</h2>
+    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        {% if tips %}
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-left text-gray-500 border-b">
+                    <th class="pb-3">Staff</th>
+                    <th class="pb-3">Role</th>
+                    <th class="pb-3">Amount</th>
+                    <th class="pb-3">Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tip in tips %}
+                <tr class="border-b">
+                    <td class="py-3">{{ tip.name or 'Unknown' }}</td>
+                    <td class="py-3 capitalize">{{ tip.role or 'N/A' }}</td>
+                    <td class="py-3">${{ "%.2f"|format(tip.amount) }}</td>
+                    <td class="py-3">{{ tip.recorded_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-gray-500 text-center py-8">No tip entries yet. Staff can report tips via SMS.</p>
+        {% endif %}
+    </div>
 </div>
 {% endblock %}
