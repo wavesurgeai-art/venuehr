@@ -28,7 +28,7 @@
                 {% endif %}
             </p>
         </div>
-        <div>
+        <div class="flex flex-col items-end gap-3">
             {% if staff.agreement_status == 'signed' %}
             <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800">Agreement Signed</span>
             {% elif staff.agreement_status == 'pending' %}
@@ -36,6 +36,8 @@
             {% else %}
             <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800">Expired</span>
             {% endif %}
+            <button type="button" onclick="document.getElementById('edit-core-form').classList.toggle('hidden')"
+                    class="text-sm font-medium text-rose-600 hover:text-rose-700">Edit Details</button>
         </div>
     </div>
 
@@ -55,6 +57,56 @@
                 <p><span class="text-gray-700">Employment:</span> {{ staff.employment_type|upper }}</p>
             </div>
         </div>
+    </div>
+
+    <!-- Collapsible core-fields edit form -->
+    <div id="edit-core-form" class="hidden bg-gray-50 rounded-xl p-6 border border-gray-200 mb-6">
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">Edit Staff Details</h3>
+        <form method="POST" action="{{ url_for('edit_staff_core', staff_id=staff.id) }}" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+                <input type="text" name="name" required value="{{ staff.name }}"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                <input type="email" name="email" required value="{{ staff.email }}"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                <input type="tel" name="phone" value="{{ staff.phone or '' }}"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Role *</label>
+                <select name="role" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
+                    {% for r in ['bartender', 'server', 'coordinator', 'security', 'other'] %}
+                    <option value="{{ r }}" {% if staff.role == r %}selected{% endif %}>{{ r|capitalize }}</option>
+                    {% endfor %}
+                    {% if staff.role and staff.role not in ['bartender', 'server', 'coordinator', 'security', 'other'] %}
+                    <option value="{{ staff.role }}" selected>{{ staff.role|capitalize }}</option>
+                    {% endif %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Employment Type</label>
+                <select name="employment_type" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
+                    <option value="w2" {% if staff.employment_type != 'contractor' %}selected{% endif %}>W-2 Employee</option>
+                    <option value="contractor" {% if staff.employment_type == 'contractor' %}selected{% endif %}>Contractor</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Hire Date</label>
+                <input type="date" name="hire_date" value="{{ staff.hire_date or '' }}"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
+            </div>
+            <div class="md:col-span-2 flex gap-3 mt-2">
+                <button type="submit" class="bg-rose-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">Save Changes</button>
+                <button type="button" onclick="document.getElementById('edit-core-form').classList.add('hidden')"
+                        class="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg text-sm font-medium hover:bg-gray-300">Cancel</button>
+            </div>
+        </form>
     </div>
 
     <div class="mt-8 pt-6 border-t border-gray-200 flex gap-4">
