@@ -2216,6 +2216,45 @@ def send_sms_alert(to_phone: str, message: str):
 
 # ─── Timesheet Handlers ──────────────────��──────────────────────────────────────
 
+
+
+def resolve_staff_event(c, staff_id, ref_date=None, window_days=1):
+    """Find the single event a staffer is confirmed on, within +/- window_days
+    of ref_date (defaults to today). Supports night-before setup and
+    night-after teardown without binding to an exact event date.
+
+    Returns (status, event) where status is:
+      'ok'       -> exactly one match; event is the row {id, name, date}
+      'none'     -> no confirmed event in the window; event is None
+      'multiple' -> more than one; event is None (caller refuses, Piece 2 later)
+    """
+    from datetime import datetime, timedelta
+    if ref_date is None:
+        ref_date = datetime.utcnow().date()
+    elif isinstance(ref_date, str):
+        ref_date = datetime.strptime(ref_date[:10], '%Y-%m-%d').date()
+    lo = (ref_date - timedelta(days=window_days)).strftime('%Y-%m-%d')
+    hi = (ref_date + timedelta(days=window_days)).strftime('%Y-%m-%d')
+    c.execute('''SELECT e.id, e.name, e.date FROM events e
+                 JOIN event_staffing es ON es.event_id = e.id
+                 WHERE es.staff_id = ? AND es.confirmed = 1
+                   AND e.date >= ? AND e.date <= ?
+                 ORDER BY e.date''', (staff_id, lo, hi))
+    rows = c.fetchall()
+    if not rows:
+        return 'none', None
+    if len(rows) > 1:
+        return 'multiple', None
+    return 'ok', rows[0]
+
+
+# Standard refusal messages so all three handlers speak the same way.
+EVENT_NONE_MSG = ("You're not assigned to an event around today, so there's nothing to "
+                  "record this against. Please contact your coordinator.")
+EVENT_MULTI_MSG = ("You're assigned to more than one event right now, so I can't tell which "
+                   "this belongs to. Please contact your coordinator to sort it out.")
+
+
 def handle_clock(phone: str, body: str, action: str):
     """Handle IN or OUT SMS commands."""
     conn = get_db()
@@ -2245,13 +2284,17 @@ def handle_clock(phone: str, body: str, action: str):
                     "Reply OUT when your shift ends.\n"
                     "Reply BREAK to start a break."), None
 
-        # Find today's assigned event
-        c.execute('''SELECT e.id, e.name FROM events e
-                     JOIN event_staffing es ON es.event_id=e.id
-                     WHERE es.staff_id=? AND es.confirmed=1 AND e.date=?
-                     LIMIT 1''', (staff_id, today))
-        event = c.fetchone()
-        event_id = event['id'] if event else None
+        # Resolve the single confirmed event in the +/-1 day window (setup/teardown safe).
+        status, event = resolve_staff_event(c, staff_id)
+        if status == 'none':
+            conn.close()
+            return ("You're not assigned to an event around today, so I can't clock you in. "
+                    "Please contact your coordinator."), None
+        if status == 'multiple':
+            conn.close()
+            return ("You're assigned to more than one event right now, so I can't tell which "
+                    "to clock you into. Please contact your coordinator."), None
+        event_id = event['id']
 
         entry_id = str(uuid.uuid4())
         c.execute('''INSERT INTO timesheet_entries (id, staff_id, event_id, clock_in, recorded_at)
@@ -2503,13 +2546,17 @@ def handle_tip(phone: str, body: str):
     staff_name = staff['name']
     today = datetime.utcnow().strftime('%Y-%m-%d')
 
-    c.execute('''SELECT e.id, e.name FROM events e
-                 JOIN event_staffing es ON es.event_id=e.id
-                 WHERE es.staff_id=? AND es.confirmed=1 AND e.date=?
-                 LIMIT 1''', (staff_id, today))
-    event = c.fetchone()
-    event_id = event['id'] if event else None
-    event_name = event['name'] if event else 'No event'
+    status, event = resolve_staff_event(c, staff_id)
+    if status == 'none':
+        conn.close()
+        return ("You're not assigned to an event around today, so there's no tip pool to add "
+                "this to. Please contact your coordinator."), None
+    if status == 'multiple':
+        conn.close()
+        return ("You're assigned to more than one event right now, so I can't tell which tip "
+                "pool this belongs to. Please contact your coordinator."), None
+    event_id = event['id']
+    event_name = event['name']
 
     # Get tip pool config (single source of truth = venue_config; venue_settings retired)
     c.execute('SELECT tip_pool_enabled, tip_model FROM venue_config WHERE id=1')
@@ -2564,14 +2611,17 @@ def handle_incident(phone: str, body: str):
 
     staff_id = staff['id']
     staff_name = staff['name']
-    today = datetime.utcnow().strftime('%Y-%m-%d')
-    c.execute('''SELECT e.id, e.name FROM events e
-                 JOIN event_staffing es ON es.event_id=e.id
-                 WHERE es.staff_id=? AND es.confirmed=1 AND e.date=?
-                 LIMIT 1''', (staff_id, today))
-    event = c.fetchone()
-    event_id = event['id'] if event else None
-    event_name = event['name'] if event else 'Unknown'
+    status, event = resolve_staff_event(c, staff_id)
+    if status == 'none':
+        conn.close()
+        return ("You're not assigned to an event around today, so I can't file this incident "
+                "against one. Please contact your coordinator."), None
+    if status == 'multiple':
+        conn.close()
+        return ("You're assigned to more than one event right now, so I can't tell which this "
+                "incident belongs to. Please contact your coordinator."), None
+    event_id = event['id']
+    event_name = event['name']
 
     incident_id = str(uuid.uuid4())
     c.execute('''INSERT INTO incidents (id, staff_id, event_id, description, severity, reported_at)
