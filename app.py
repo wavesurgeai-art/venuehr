@@ -880,6 +880,47 @@ def staff_detail(staff_id):
                           onboarding_docs=onboarding_docs, onboarding_complete=onboarding_complete,
                           admin_name=session.get('admin_name'))
 
+
+
+@app.route('/admin/staff/<staff_id>/edit', methods=['POST'])
+@login_required
+def edit_staff_core(staff_id):
+    """Edit a staffer's core fields (name, email, phone, role, type, hire date).
+    Separate from the staff_detail profile save, which only writes staff_profiles."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id FROM staff WHERE id = ?', (staff_id,))
+    if not c.fetchone():
+        conn.close()
+        flash('Staff member not found.', 'error')
+        return redirect(url_for('staff_list'))
+
+    name = (request.form.get('name') or '').strip()
+    email = (request.form.get('email') or '').strip()
+    phone = (request.form.get('phone') or '').strip()
+    role = (request.form.get('role') or '').strip()
+    employment_type = (request.form.get('employment_type') or 'w2').strip()
+    hire_date = (request.form.get('hire_date') or '').strip()
+
+    if not name or not email or not role:
+        conn.close()
+        flash('Name, email, and role are required.', 'error')
+        return redirect(url_for('staff_detail', staff_id=staff_id))
+
+    # Title-case the display name so "jeff hackett" -> "Jeff Hackett".
+    name = name.title()
+
+    c.execute('''UPDATE staff
+                 SET name = ?, email = ?, phone = ?, role = ?,
+                     employment_type = ?, hire_date = ?
+                 WHERE id = ?''',
+              (name, email, phone, role, employment_type, hire_date, staff_id))
+    conn.commit()
+    conn.close()
+    flash('Staff details updated.', 'success')
+    return redirect(url_for('staff_detail', staff_id=staff_id))
+
+
 @app.route('/admin/staff/<staff_id>/agreement')
 @login_required
 def view_agreement(staff_id):
