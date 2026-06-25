@@ -701,10 +701,106 @@ def staff_list():
         flash(f'Staff member added. Onboarding link: {onboarding_link}', 'success')
         conn.close()
         return redirect(url_for('staff_list'))
-    c.execute('SELECT * FROM staff ORDER BY created_at DESC')
+    ensure_staff_archive_schema()
+    show_archived = request.args.get('archived') == '1'
+    flag = 1 if show_archived else 0
+    c.execute('SELECT * FROM staff WHERE COALESCE(archived, 0) = ? ORDER BY created_at DESC', (flag,))
     staff_members = c.fetchall()
+    c.execute('SELECT COUNT(*) AS n FROM staff WHERE COALESCE(archived, 0) = 1')
+    archived_count = c.fetchone()['n']
     conn.close()
-    return render_template('staff_list.html', staff=staff_members, admin_name=session.get('admin_name'))
+    return render_template('staff_list.html', staff=staff_members,
+                           show_archived=show_archived, archived_count=archived_count,
+                           admin_name=session.get('admin_name'))
+
+
+
+@app.route('/admin/staff/<staff_id>/archive', methods=['POST'])
+@login_required
+def archive_staff(staff_id):
+    """Soft-delete: drop a staffer off the active roster but keep all records
+    (signed I-9/W-4, agreements, timesheets) intact and restorable."""
+    ensure_staff_archive_schema()
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT name FROM staff WHERE id = ?', (staff_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        flash('Staff member not found.', 'error')
+        return redirect(url_for('staff_list'))
+    c.execute('UPDATE staff SET archived = 1 WHERE id = ?', (staff_id,))
+    conn.commit()
+    conn.close()
+    flash(f'{row["name"]} archived. Records retained \u2014 restore anytime from the Archived view.', 'success')
+    return redirect(url_for('staff_list'))
+
+
+@app.route('/admin/staff/<staff_id>/restore', methods=['POST'])
+@login_required
+def restore_staff(staff_id):
+    """Bring an archived staffer back onto the active roster."""
+    ensure_staff_archive_schema()
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT name FROM staff WHERE id = ?', (staff_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        flash('Staff member not found.', 'error')
+        return redirect(url_for('staff_list', archived=1))
+    c.execute('UPDATE staff SET archived = 0 WHERE id = ?', (staff_id,))
+    conn.commit()
+    conn.close()
+    flash(f'{row["name"]} restored to the active roster.', 'success')
+    return redirect(url_for('staff_list'))
+
+
+@app.route('/admin/staff/<staff_id>/purge', methods=['POST'])
+@login_required
+def purge_staff(staff_id):
+    """Hard-delete an archived staffer and ALL their records. Irreversible.
+    Reserved for genuine test/junk records (only reachable from Archived view).
+    Destroys signed compliance docs -- never expose this for active staff."""
+    ensure_staff_archive_schema()
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT name, archived, phone FROM staff WHERE id = ?', (staff_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        flash('Staff member not found.', 'error')
+        return redirect(url_for('staff_list', archived=1))
+    # Guard: refuse to purge an active staffer -- must be archived first.
+    if not row['archived']:
+        conn.close()
+        flash('Archive this staff member before deleting permanently.', 'error')
+        return redirect(url_for('staff_list'))
+    name = row['name']
+    # Cascade: remove dependent records across all staff-scoped tables.
+    for tbl in ('onboarding_documents', 'staff_profiles', 'agreements',
+                'event_staffing', 'timesheet_entries', 'tip_entries',
+                'tip_distributions', 'shift_swap_requests',
+                'performance_ratings', 'incidents'):
+        try:
+            c.execute(f'DELETE FROM {tbl} WHERE staff_id = ?', (staff_id,))
+        except Exception:
+            pass
+    # onboarding_state is keyed by phone, not staff_id
+    try:
+        if row['phone']:
+            c.execute('DELETE FROM onboarding_state WHERE phone = ?', (row['phone'],))
+    except Exception:
+        pass
+    try:
+        c.execute('DELETE FROM staff WHERE id = ?', (staff_id,))
+    except Exception:
+        pass
+    conn.commit()
+    conn.close()
+    flash(f'{name} and all associated records permanently deleted.', 'success')
+    return redirect(url_for('staff_list', archived=1))
+
 
 @app.route('/admin/staff/<staff_id>', methods=['GET', 'POST'])
 @login_required
@@ -860,6 +956,30 @@ def resend_link(staff_id):
     return redirect(url_for('staff_list'))
 
 _onboarding_schema_ready = False
+
+# Tracks whether the staff.archived column has been ensured this process.
+_staff_archive_schema_ready = False
+
+
+def ensure_staff_archive_schema():
+    """Idempotently ensure staff.archived exists (soft-delete flag).
+    archived = 0 -> active roster; archived = 1 -> hidden in Archived view.
+    Self-heals on the live DB without a manual migration."""
+    global _staff_archive_schema_ready
+    if _staff_archive_schema_ready:
+        return
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        try:
+            c.execute("ALTER TABLE staff ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+        conn.close()
+        _staff_archive_schema_ready = True
+    except Exception:
+        pass  # leave flag False so the next request retries
 
 
 def ensure_onboarding_schema():
