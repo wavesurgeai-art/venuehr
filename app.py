@@ -593,6 +593,62 @@ def init_db():
 
 # ─── Auth helpers ─────────────────────────────────────────────────────────────
 
+
+
+def normalize_phone(raw):
+    """Normalize a US phone number to E.164 (+1XXXXXXXXXX).
+    Strips spaces/dashes/parens so '+1 317-555-0410' and '(317) 555-0410'
+    both become '+13175550410'. Non-US/odd input is returned trimmed, unchanged."""
+    if not raw:
+        return ''
+    digits = re.sub(r'\D', '', str(raw))
+    if len(digits) == 11 and digits.startswith('1'):
+        digits = digits[1:]
+    if len(digits) == 10:
+        return '+1' + digits
+    return str(raw).strip()
+
+
+def _phone_digits(raw):
+    """Last 10 digits of a phone, for format-agnostic matching."""
+    d = re.sub(r'\D', '', str(raw or ''))
+    if len(d) == 11 and d.startswith('1'):
+        d = d[1:]
+    return d
+
+
+def find_staff_by_phone(c, phone, columns='id, name'):
+    """Look up a staff row by phone, tolerant of stored formatting differences.
+    1) exact match on the incoming (E.164) value;
+    2) fallback: compare digit-only forms across active staff;
+    On a fallback hit, self-heal by rewriting that row's phone to clean E.164.
+    Returns the row (sqlite/psycopg dict row) or None."""
+    c.execute(f'SELECT {columns} FROM staff WHERE phone = ?', (phone,))
+    row = c.fetchone()
+    if row:
+        return row
+    target = _phone_digits(phone)
+    if len(target) != 10:
+        return None
+    # Scan staff for a digit-equal phone (small table; fine to iterate).
+    c.execute('SELECT id, phone FROM staff')
+    candidates = c.fetchall()
+    match_id = None
+    for cand in candidates:
+        if _phone_digits(cand['phone']) == target:
+            match_id = cand['id']
+            break
+    if not match_id:
+        return None
+    # Self-heal: store the clean E.164 form so future lookups hit the fast path.
+    try:
+        c.execute('UPDATE staff SET phone = ? WHERE id = ?', (normalize_phone(phone), match_id))
+    except Exception:
+        pass
+    c.execute(f'SELECT {columns} FROM staff WHERE id = ?', (match_id,))
+    return c.fetchone()
+
+
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -667,7 +723,7 @@ def staff_list():
         token = str(uuid.uuid4())
         name = request.form.get('name')
         email = request.form.get('email')
-        phone = request.form.get('phone', '')
+        phone = normalize_phone(request.form.get('phone', ''))
         role = request.form.get('role')
         hire_date = request.form.get('hire_date', '')
         now = datetime.utcnow().isoformat()
@@ -897,7 +953,7 @@ def edit_staff_core(staff_id):
 
     name = (request.form.get('name') or '').strip()
     email = (request.form.get('email') or '').strip()
-    phone = (request.form.get('phone') or '').strip()
+    phone = normalize_phone(request.form.get('phone') or '')
     role = (request.form.get('role') or '').strip()
     employment_type = (request.form.get('employment_type') or 'w2').strip()
     hire_date = (request.form.get('hire_date') or '').strip()
@@ -2164,8 +2220,7 @@ def handle_clock(phone: str, body: str, action: str):
     """Handle IN or OUT SMS commands."""
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT id, name FROM staff WHERE phone = ?', (phone,))
-    staff = c.fetchone()
+    staff = find_staff_by_phone(c, phone)
     conn.close()
     if not staff:
         return "I don't recognize that phone number. Please contact your manager.", None
@@ -2248,8 +2303,7 @@ def handle_break_response(phone: str, body: str):
 
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT id, name FROM staff WHERE phone = ?', (phone,))
-    staff = c.fetchone()
+    staff = find_staff_by_phone(c, phone)
     if not staff:
         conn.close()
         return "I don't recognize that phone number."
@@ -2440,8 +2494,7 @@ def handle_tip(phone: str, body: str):
 
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT id, name FROM staff WHERE phone = ?', (phone,))
-    staff = c.fetchone()
+    staff = find_staff_by_phone(c, phone)
     if not staff:
         conn.close()
         return "I don't recognize that phone number. Please contact your manager.", None
@@ -2504,8 +2557,7 @@ def handle_incident(phone: str, body: str):
 
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT id, name FROM staff WHERE phone=?', (phone,))
-    staff = c.fetchone()
+    staff = find_staff_by_phone(c, phone)
     if not staff:
         conn.close()
         return "I don't recognize that phone number. Please contact your manager.", None
@@ -2554,8 +2606,7 @@ def handle_swap_request(phone: str, body: str):
 
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT id, name FROM staff WHERE phone=?', (phone,))
-    staff = c.fetchone()
+    staff = find_staff_by_phone(c, phone)
     if not staff:
         conn.close()
         return "I don't recognize that phone number. Please contact your manager.", None
@@ -2598,8 +2649,7 @@ def handle_rating(phone: str, body: str):
 
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT id, name FROM staff WHERE phone=?', (phone,))
-    staff = c.fetchone()
+    staff = find_staff_by_phone(c, phone)
     if not staff:
         conn.close()
         return "I don't recognize that phone number.", None
