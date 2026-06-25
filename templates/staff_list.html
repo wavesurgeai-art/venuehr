@@ -5,16 +5,24 @@
 {% block content %}
 <div class="flex justify-between items-center mb-8">
     <div>
-        <h1 class="text-2xl font-bold text-gray-900">Staff Roster</h1>
-        <p class="text-gray-500">Manage staff and track agreement compliance</p>
+        <h1 class="text-2xl font-bold text-gray-900">{% if show_archived %}Archived Staff{% else %}Staff Roster{% endif %}</h1>
+        <p class="text-gray-500">{% if show_archived %}Restore staff to the active roster, or permanently delete test records{% else %}Manage staff and track agreement compliance{% endif %}</p>
     </div>
-    <button onclick="document.getElementById('add-form').classList.toggle('hidden')"
-            class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition">
-        + Add Staff Member
-    </button>
+    <div class="flex items-center gap-3">
+        {% if show_archived %}
+        <a href="{{ url_for('staff_list') }}" class="text-gray-600 hover:text-gray-900 text-sm font-medium px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition">&larr; Back to Active Roster</a>
+        {% else %}
+        <a href="{{ url_for('staff_list', archived=1) }}" class="text-gray-600 hover:text-gray-900 text-sm font-medium px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition">Archived{% if archived_count %} ({{ archived_count }}){% endif %}</a>
+        <button onclick="document.getElementById('add-form').classList.toggle('hidden')"
+                class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition">
+            + Add Staff Member
+        </button>
+        {% endif %}
+    </div>
 </div>
 
 <!-- Add Staff Form -->
+{% if not show_archived %}
 <div id="add-form" class="hidden bg-white rounded-xl shadow-sm p-6 border border-gray-200 mb-8">
     <h2 class="text-lg font-semibold text-gray-900 mb-4">Add New Staff Member</h2>
     <form method="POST" class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -56,6 +64,7 @@
         </div>
     </form>
 </div>
+{% endif %}
 
 <!-- Staff Table -->
 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -95,8 +104,9 @@
                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">Expired</span>
                     {% endif %}
                 </td>
-                <td class="px-6 py-4 flex gap-2">
+                <td class="px-6 py-4 flex gap-2 flex-wrap">
                     <a href="{{ url_for('staff_detail', staff_id=s.id) }}" class="text-rose-600 hover:text-rose-700 text-sm font-medium">View</a>
+                    {% if not show_archived %}
                     {% if s.agreement_status == 'pending' %}
                     <form method="POST" action="{{ url_for('resend_link', staff_id=s.id) }}" class="inline">
                         <button type="submit" class="text-gray-600 hover:text-gray-700 text-sm font-medium">Resend Link</button>
@@ -105,11 +115,25 @@
                     {% if s.agreement_status == 'signed' %}
                     <a href="{{ url_for('view_agreement', staff_id=s.id) }}" class="text-gray-600 hover:text-gray-700 text-sm font-medium">View Agreement</a>
                     {% endif %}
+                    <form method="POST" action="{{ url_for('archive_staff', staff_id=s.id) }}" class="inline"
+                          onsubmit="return confirm('Archive {{ s.name|e }}? They will be removed from the active roster but all records are kept and can be restored anytime.');">
+                        <button type="submit" class="text-amber-600 hover:text-amber-700 text-sm font-medium">Archive</button>
+                    </form>
+                    {% else %}
+                    <form method="POST" action="{{ url_for('restore_staff', staff_id=s.id) }}" class="inline"
+                          onsubmit="return confirm('Restore {{ s.name|e }} to the active roster?');">
+                        <button type="submit" class="text-emerald-600 hover:text-emerald-700 text-sm font-medium">Restore</button>
+                    </form>
+                    <form method="POST" action="{{ url_for('purge_staff', staff_id=s.id) }}" class="inline"
+                          onsubmit="return confirm('PERMANENTLY delete {{ s.name|e }} and ALL their records, including any signed I-9/W-4 and agreements? This cannot be undone. Use only for test records.');">
+                        <button type="submit" class="text-red-600 hover:text-red-700 text-sm font-medium">Delete Permanently</button>
+                    </form>
+                    {% endif %}
                 </td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="6" class="px-6 py-12 text-center text-gray-500">No staff members yet. Add your first staff member above.</td>
+                <td colspan="6" class="px-6 py-12 text-center text-gray-500">{% if show_archived %}No archived staff.{% else %}No staff members yet. Add your first staff member above.{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>
