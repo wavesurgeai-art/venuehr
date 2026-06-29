@@ -5,50 +5,161 @@
 {% block content %}
 <h1 class="text-2xl font-bold text-gray-900 mb-6">Events</h1>
 
+<!-- Shared space suggestions: free-text first time, tap-to-fill thereafter -->
+<datalist id="space-options">
+    {% for s in spaces %}<option value="{{ s }}">{% endfor %}
+</datalist>
+
 <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 mb-6">
-    <h2 class="text-lg font-semibold mb-4">Add New Event</h2>
-    <form method="POST" class="flex gap-4 items-end flex-wrap">
-        <div>
-            <label class="block text-sm text-gray-500 mb-1">Event Name</label>
-            <input type="text" name="name" required placeholder="Smith Wedding" class="border rounded px-3 py-2">
-        </div>
-        <div>
-            <label class="block text-sm text-gray-500 mb-1">Date</label>
-            <input type="date" name="date" required class="border rounded px-3 py-2">
-        </div>
-        <div>
-            <label class="block text-sm text-gray-500 mb-1">Guest Count</label>
-            <input type="number" name="guest_count" required placeholder="150" class="border rounded px-3 py-2">
-        </div>
-        <button type="submit" class="bg-rose-600 text-white px-4 py-2 rounded hover:bg-rose-700">Add Event</button>
-    </form>
+    <details {% if not events %}open{% endif %}>
+        <summary class="text-lg font-semibold cursor-pointer select-none">Add New Event</summary>
+        <form method="POST" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Event Name</label>
+                <input type="text" name="name" required placeholder="Smith Wedding"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Guest Count</label>
+                <input type="number" name="guest_count" min="0" placeholder="150"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Event Date</label>
+                <input type="date" name="date" required
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                <input type="time" name="start_time"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                <input type="time" name="end_time"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Setup Date</label>
+                <input type="date" name="setup_date"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Setup Time</label>
+                <input type="time" name="setup_time"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+            </div>
+            <div class="hidden md:block"></div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Teardown Date</label>
+                <input type="date" name="teardown_date"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Teardown Time</label>
+                <input type="time" name="teardown_time"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+            </div>
+            <div class="hidden md:block"></div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Space</label>
+                <input type="text" name="space" list="space-options" placeholder="Glass Barn"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Location / Property</label>
+                <input type="text" name="location" placeholder="Willowmere Gardens"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Tip Model</label>
+                <select name="tip_model"
+                        class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500">
+                    {% for value, label, help in tip_models %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="md:col-span-3">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <textarea name="notes" rows="2" placeholder="Plated dinner; vendor tables; etc."
+                          class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-rose-500"></textarea>
+            </div>
+
+            <div class="md:col-span-3">
+                <button type="submit"
+                        class="bg-rose-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-rose-700">
+                    Add Event
+                </button>
+            </div>
+        </form>
+    </details>
 </div>
 
 <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
     {% if events %}
+    <div class="overflow-x-auto">
     <table class="w-full text-sm">
         <thead>
             <tr class="text-left text-gray-500 border-b">
-                <th class="pb-3">Event</th>
-                <th class="pb-3">Date</th>
-                <th class="pb-3">Guests</th>
+                <th class="pb-3 pr-4">Event</th>
+                <th class="pb-3 pr-4">Date</th>
+                <th class="pb-3 pr-4">Space</th>
+                <th class="pb-3 pr-4">Guests</th>
+                <th class="pb-3 pr-4">Tip Model</th>
+                <th class="pb-3 pr-4">Status</th>
                 <th class="pb-3">Actions</th>
             </tr>
         </thead>
         <tbody>
             {% for event in events %}
-            <tr class="border-b">
-                <td class="py-3">{{ event.name }}</td>
-                <td class="py-3">{{ event.date }}</td>
-                <td class="py-3">{{ event.guest_count }}</td>
-                <td class="py-3">
-                    <a href="{{ url_for('staffing_detail', event_id=event.id) }}" class="text-rose-600 hover:underline">Staffing</a>
+            {% set cancelled = (event.status == 'cancelled') %}
+            <tr class="border-b {% if cancelled %}opacity-60{% endif %}">
+                <td class="py-3 pr-4 font-medium text-gray-900">{{ event.name }}</td>
+                <td class="py-3 pr-4 text-gray-700">
+                    {{ event.date }}{% if event.start_time %} · {{ event.start_time }}{% endif %}
+                </td>
+                <td class="py-3 pr-4 text-gray-700">{{ event.space or '—' }}</td>
+                <td class="py-3 pr-4 text-gray-700">{{ event.guest_count }}</td>
+                <td class="py-3 pr-4 text-gray-700">
+                    {% if event.tip_model == 'keep_own' %}Keep Own
+                    {% elif event.tip_model == 'tipout_pct' %}Tip-Out %
+                    {% else %}Equal Pool{% endif %}
+                </td>
+                <td class="py-3 pr-4">
+                    {% if cancelled %}
+                    <span class="inline-block px-2 py-0.5 text-xs rounded-full bg-gray-200 text-gray-600">Cancelled</span>
+                    {% else %}
+                    <span class="inline-block px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Active</span>
+                    {% endif %}
+                </td>
+                <td class="py-3 whitespace-nowrap">
+                    <a href="{{ url_for('event_edit', event_id=event.id) }}" class="text-rose-600 hover:underline">Edit</a>
+                    <a href="{{ url_for('staffing_detail', event_id=event.id) }}" class="text-rose-600 hover:underline ml-3">Staffing</a>
                     <a href="{{ url_for('event_qr', event_id=event.id) }}" class="text-rose-600 hover:underline ml-3">Rating QR</a>
+                    {% if cancelled %}
+                    <form method="POST" action="{{ url_for('event_cancel', event_id=event.id) }}" class="inline ml-3">
+                        <input type="hidden" name="action" value="restore">
+                        <button type="submit" class="text-green-700 hover:underline">Restore</button>
+                    </form>
+                    {% else %}
+                    <form method="POST" action="{{ url_for('event_cancel', event_id=event.id) }}" class="inline ml-3"
+                          onsubmit="return confirm('Cancel this event? It will be archived (records preserved), not deleted.');">
+                        <input type="hidden" name="action" value="cancel">
+                        <button type="submit" class="text-gray-500 hover:text-red-600 hover:underline">Cancel</button>
+                    </form>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    </div>
     {% else %}
     <p class="text-gray-500 text-center py-8">No events yet.</p>
     {% endif %}
