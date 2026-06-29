@@ -410,17 +410,43 @@ def init_db():
         tip_model TEXT NOT NULL DEFAULT 'equal_pool'
     )''')
     # Existing-DB migration: add tip_model if venue_config predates this column.
-    try:
-        c.execute("ALTER TABLE venue_config ADD COLUMN tip_model TEXT NOT NULL DEFAULT 'equal_pool'")
-    except Exception:
-        pass
+    # IF NOT EXISTS is idempotent and safe to run on every boot (no tx abort).
+    c.execute("ALTER TABLE venue_config ADD COLUMN IF NOT EXISTS tip_model TEXT NOT NULL DEFAULT 'equal_pool'")
     c.execute('''CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
         date TEXT NOT NULL,
         name TEXT NOT NULL,
         guest_count INTEGER NOT NULL DEFAULT 0,
+        start_time TEXT DEFAULT '',
+        end_time TEXT DEFAULT '',
+        setup_date TEXT DEFAULT '',
+        setup_time TEXT DEFAULT '',
+        teardown_date TEXT DEFAULT '',
+        teardown_time TEXT DEFAULT '',
+        space TEXT DEFAULT '',
+        location TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        tip_model TEXT NOT NULL DEFAULT 'equal_pool',
+        status TEXT NOT NULL DEFAULT 'active',
         created_at TEXT NOT NULL
     )''')
+    # Existing-DB migrations: add event columns if the table predates them.
+    # ADD COLUMN IF NOT EXISTS is idempotent and never raises, so it can't abort
+    # the surrounding schema transaction (unlike a bare ALTER on a present column).
+    for _ddl in [
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS start_time TEXT DEFAULT ''",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS end_time TEXT DEFAULT ''",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS setup_date TEXT DEFAULT ''",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS setup_time TEXT DEFAULT ''",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS teardown_date TEXT DEFAULT ''",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS teardown_time TEXT DEFAULT ''",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS space TEXT DEFAULT ''",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS location TEXT DEFAULT ''",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS tip_model TEXT NOT NULL DEFAULT 'equal_pool'",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'",
+    ]:
+        c.execute(_ddl)
     c.execute('''CREATE TABLE IF NOT EXISTS event_staffing (
         id TEXT PRIMARY KEY,
         event_id TEXT NOT NULL,
@@ -1385,8 +1411,8 @@ def staffing_matrix():
         conn.close()
         return redirect(url_for('staffing_matrix'))
 
-    # Load events
-    c.execute('SELECT * FROM events ORDER BY date DESC')
+    # Load events (hide cancelled/archived from the active staffing list)
+    c.execute("SELECT * FROM events WHERE status <> 'cancelled' ORDER BY date DESC")
     events = c.fetchall()
 
     # Load staff pool
@@ -1495,20 +1521,104 @@ def staffing_broadcast(event_id):
 @app.route('/admin/events', methods=['GET', 'POST'])
 @login_required
 def events_list():
-    """List and manage events."""
+    """List and create events."""
     conn = get_db()
     c = conn.cursor()
     if request.method == 'POST':
+        tip_model = request.form.get('tip_model', 'equal_pool')
+        if tip_model not in TIP_MODEL_VALUES:
+            tip_model = 'equal_pool'
         event_id = str(uuid.uuid4())
-        c.execute('INSERT INTO events (id, date, name, guest_count, created_at) VALUES (?, ?, ?, ?, ?)',
+        c.execute('''INSERT INTO events
+                     (id, date, name, guest_count, start_time, end_time,
+                      setup_date, setup_time, teardown_date, teardown_time,
+                      space, location, notes, tip_model, status, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)''',
                   (event_id, request.form.get('date'), request.form.get('name'),
-                   int(request.form.get('guest_count', 0)), datetime.utcnow().isoformat()))
+                   int(request.form.get('guest_count') or 0),
+                   request.form.get('start_time', ''), request.form.get('end_time', ''),
+                   request.form.get('setup_date', ''), request.form.get('setup_time', ''),
+                   request.form.get('teardown_date', ''), request.form.get('teardown_time', ''),
+                   request.form.get('space', '').strip(), request.form.get('location', '').strip(),
+                   request.form.get('notes', '').strip(), tip_model,
+                   datetime.utcnow().isoformat()))
         conn.commit()
         flash('Event created.', 'success')
-    c.execute('SELECT * FROM events ORDER BY date DESC')
+        conn.close()
+        return redirect(url_for('events_list'))
+    c.execute("SELECT * FROM events ORDER BY (status = 'cancelled'), date DESC")
     events = c.fetchall()
+    # Distinct, non-blank spaces already used -> datalist suggestions for consistency.
+    c.execute("SELECT DISTINCT space FROM events WHERE space IS NOT NULL AND space <> '' ORDER BY space")
+    spaces = [r['space'] for r in c.fetchall()]
     conn.close()
-    return render_template('admin_events.html', events=events, admin_name=session.get('admin_name'))
+    return render_template('admin_events.html', events=events, spaces=spaces,
+                           tip_models=TIP_MODEL_CHOICES, admin_name=session.get('admin_name'))
+
+
+@app.route('/admin/events/<event_id>/edit', methods=['GET', 'POST'])
+@login_required
+def event_edit(event_id):
+    """Edit all details of a single event, including its tip model."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM events WHERE id = ?', (event_id,))
+    event = c.fetchone()
+    if not event:
+        conn.close()
+        flash('Event not found.', 'error')
+        return redirect(url_for('events_list'))
+
+    if request.method == 'POST':
+        tip_model = request.form.get('tip_model', 'equal_pool')
+        if tip_model not in TIP_MODEL_VALUES:
+            tip_model = 'equal_pool'
+        c.execute('''UPDATE events SET
+                       name = ?, date = ?, guest_count = ?,
+                       start_time = ?, end_time = ?,
+                       setup_date = ?, setup_time = ?,
+                       teardown_date = ?, teardown_time = ?,
+                       space = ?, location = ?, notes = ?, tip_model = ?
+                     WHERE id = ?''',
+                  (request.form.get('name'), request.form.get('date'),
+                   int(request.form.get('guest_count') or 0),
+                   request.form.get('start_time', ''), request.form.get('end_time', ''),
+                   request.form.get('setup_date', ''), request.form.get('setup_time', ''),
+                   request.form.get('teardown_date', ''), request.form.get('teardown_time', ''),
+                   request.form.get('space', '').strip(), request.form.get('location', '').strip(),
+                   request.form.get('notes', '').strip(), tip_model, event_id))
+        conn.commit()
+        conn.close()
+        flash('Event updated.', 'success')
+        return redirect(url_for('events_list'))
+
+    c.execute("SELECT DISTINCT space FROM events WHERE space IS NOT NULL AND space <> '' ORDER BY space")
+    spaces = [r['space'] for r in c.fetchall()]
+    conn.close()
+    return render_template('admin_event_edit.html', event=event, spaces=spaces,
+                           tip_models=TIP_MODEL_CHOICES, admin_name=session.get('admin_name'))
+
+
+@app.route('/admin/events/<event_id>/cancel', methods=['POST'])
+@login_required
+def event_cancel(event_id):
+    """Cancel (archive) or restore an event. Guarded soft-delete: the row and its
+    timesheets/tips are preserved for recordkeeping; we just flip status."""
+    action = request.form.get('action', 'cancel')
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT status FROM events WHERE id = ?', (event_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        flash('Event not found.', 'error')
+        return redirect(url_for('events_list'))
+    new_status = 'active' if action == 'restore' else 'cancelled'
+    c.execute('UPDATE events SET status = ? WHERE id = ?', (new_status, event_id))
+    conn.commit()
+    conn.close()
+    flash('Event restored.' if new_status == 'active' else 'Event cancelled (archived).', 'success')
+    return redirect(url_for('events_list'))
 
 @app.route('/admin/timesheets', methods=['GET'])
 @login_required
@@ -1603,8 +1713,14 @@ def admin_tips_distribute(event_id):
     """Calculate (or recalculate) the hours-weighted equal-pool split for an event."""
     result = distribute_event_tips(event_id)
     if result['ok']:
-        basis = 'split by hours worked' if result['basis'] == 'hours' else 'split evenly (no hours logged)'
-        flash(f"Tip pool of ${result['pool_total']:.2f} {basis} across "
+        basis_map = {
+            'hours': 'equal pool, split by hours worked',
+            'even': 'equal pool, split evenly (no hours logged)',
+            'keep_own': 'keep-your-own (no redistribution)',
+            'tipout': 'tip-out to support staff',
+        }
+        basis = basis_map.get(result['basis'], result['basis'])
+        flash(f"Tip pool of ${result['pool_total']:.2f} distributed ({basis}) across "
               f"{len(result['rows'])} staff.", 'success')
     else:
         flash(result['error'] or 'Could not calculate tip split.', 'error')
@@ -1956,10 +2072,18 @@ def demo_mode():
     # ── Create demo event ─────────────────────────────────────────────────────
     event_id = str(uuid.uuid4())
     event_date = (now + timedelta(days=14)).strftime('%Y-%m-%d')
+    setup_date = (now + timedelta(days=13)).strftime('%Y-%m-%d')      # night-before setup
+    teardown_date = (now + timedelta(days=15)).strftime('%Y-%m-%d')   # morning-after teardown
     try:
-        c.execute("""INSERT OR IGNORE INTO events (id, date, name, guest_count, created_at)
-                      VALUES (?, ?, ?, ?, ?)""",
-                  (event_id, event_date, 'Johnson Wedding Reception', 150, now.isoformat()))
+        c.execute("""INSERT OR IGNORE INTO events
+                      (id, date, name, guest_count, start_time, end_time,
+                       setup_date, setup_time, teardown_date, teardown_time,
+                       space, location, notes, tip_model, status, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)""",
+                  (event_id, event_date, 'Johnson Wedding Reception', 150,
+                   '17:00', '23:00', setup_date, '14:00', teardown_date, '09:00',
+                   'Glass Barn', 'Willowmere Gardens', 'Plated dinner; 6 vendor tables.',
+                   'equal_pool', now.isoformat()))
     except Exception:
         pass
 
@@ -2428,17 +2552,73 @@ TIP_MODELS = {
 }
 
 
-def distribute_event_tips(event_id):
-    """Compute hours-weighted equal-pool shares for one event and persist them
-    into tip_distributions (replacing any prior calc for that event).
+# Tip-out role policy (per Jeff's call). Front-of-house tipped roles contribute a
+# percentage of their own logged tips into a pool shared by the support roles.
+# Centralized here so the multi-vertical VERTICALS work can later override per vertical.
+TIPOUT_CONTRIBUTE_ROLES = {'Server', 'Bartender'}
+TIPOUT_SUPPORT_ROLES = {'Event Lead', 'Security/Parking'}
 
-    Returns dict: {ok, pool_total, rows:[...], basis ('hours'|'even'|'none'), error}.
-    Rule (per Jeff's call): staff missing timesheet hours are imputed at the
-    crew average so nobody who reported tips lands at $0; if NOBODY has hours,
-    the event splits evenly across participants.
+# (value, label, help) for the per-event tip-model selector.
+TIP_MODEL_CHOICES = [
+    ('equal_pool', 'Equal Pool (hours-weighted)',
+     'All tips pooled, split across the crew by hours worked.'),
+    ('keep_own', 'Keep Your Own',
+     'Each staffer keeps the tips they personally logged. No redistribution.'),
+    ('tipout_pct', 'Tip-Out % to Support',
+     'Servers/Bartenders keep their tips minus a set % that pools to Event Lead/Security.'),
+]
+TIP_MODEL_VALUES = {v for v, _, _ in TIP_MODEL_CHOICES}
+
+
+def _normalize_tipout_rate(raw):
+    """Return a fraction in [0,1]. Tolerates both seed conventions: 0.20 and 20.0
+    (and 20 percentage points typed as 20). Values > 1 are treated as percent."""
+    try:
+        r = float(raw or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if r > 1:
+        r = r / 100.0
+    if r < 0:
+        r = 0.0
+    if r > 1:
+        r = 1.0
+    return r
+
+
+def _event_tip_model(c, event_id):
+    """Resolve the tip model for an event: the event's own setting wins; fall back
+    to the venue-wide default in venue_config; final fallback 'equal_pool'."""
+    c.execute('SELECT tip_model FROM events WHERE id = ?', (event_id,))
+    row = c.fetchone()
+    model = (row['tip_model'] if row and row['tip_model'] else '').strip()
+    if model in ('equal_pool', 'keep_own', 'tipout_pct'):
+        return model
+    c.execute('SELECT tip_model FROM venue_config WHERE id = 1')
+    cfg = c.fetchone()
+    model = (cfg['tip_model'] if cfg and cfg['tip_model'] else '').strip()
+    return model if model in ('equal_pool', 'keep_own', 'tipout_pct') else 'equal_pool'
+
+
+def distribute_event_tips(event_id):
+    """Compute and persist per-staff tip shares for one event, using the event's
+    selected tip model. Clears any prior calc for the event first.
+
+    Models:
+      - equal_pool: pool every logged tip, split hours-weighted across participants
+        (confirmed crew UNION tip-loggers). Missing hours imputed at crew average;
+        if nobody logged hours, split evenly.
+      - keep_own: no redistribution; each staffer's share = the tips they logged.
+      - tipout_pct: contributors (Server/Bartender) keep their own logged tips minus
+        a rate; the withheld amount pools to support roles (Event Lead/Security),
+        split hours-weighted. No support staff present => no tip-out taken.
+
+    Returns dict: {ok, model, pool_total, rows:[...], basis, error}.
     """
     conn = get_db()
     c = conn.cursor()
+
+    model = _event_tip_model(c, event_id)
 
     # Pool = sum of all tips logged for this event.
     c.execute('SELECT COALESCE(SUM(amount), 0) AS pool FROM tip_entries WHERE event_id = ?',
@@ -2458,12 +2638,19 @@ def distribute_event_tips(event_id):
 
     if pool_total <= 0 or not participants:
         conn.close()
-        return {'ok': False, 'pool_total': pool_total, 'rows': [],
+        return {'ok': False, 'model': model, 'pool_total': pool_total, 'rows': [],
                 'basis': 'none',
                 'error': 'No tips logged for this event yet.' if pool_total <= 0
                          else 'No confirmed crew or tip-loggers on this event.'}
 
-    # Hours per participant (sum timesheet total_hours for this event).
+    # Per-participant logged tips (their own contribution to the pool).
+    own = {}
+    for p in participants:
+        c.execute('SELECT COALESCE(SUM(amount), 0) AS a FROM tip_entries '
+                  'WHERE staff_id = ? AND event_id = ?', (p['staff_id'], event_id))
+        own[p['staff_id']] = float(c.fetchone()['a'] or 0)
+
+    # Hours per participant (None => no timesheet hours logged for this event).
     hours = {}
     for p in participants:
         c.execute('SELECT COALESCE(SUM(total_hours), 0) AS h FROM timesheet_entries '
@@ -2471,55 +2658,105 @@ def distribute_event_tips(event_id):
         h = float(c.fetchone()['h'] or 0)
         hours[p['staff_id']] = h if h > 0 else None
 
-    real = [h for h in hours.values() if h is not None]
-    if real:
-        avg = sum(real) / len(real)
-        basis = 'hours'
-    else:
-        avg = None
-        basis = 'even'
-
-    # Build weights (impute missing at avg; if nobody has hours, weight 1 each).
-    weights, imputed = {}, {}
-    for sid, h in hours.items():
-        if h is not None:
-            weights[sid] = h
-            imputed[sid] = False
-        elif avg is not None:
-            weights[sid] = avg
-            imputed[sid] = True
-        else:
-            weights[sid] = 1.0
-            imputed[sid] = True
-
-    total_w = sum(weights.values())
     now = datetime.utcnow().isoformat()
+    shares = {}      # staff_id -> dollars
+    hours_used = {}  # staff_id -> hours figure stored for transparency
+    imputed = {}     # staff_id -> bool
+
+    def _hours_weighted(ids, amount):
+        """Split `amount` across `ids` weighted by hours; impute missing at the
+        average of those who have hours; even split if nobody does. Mutates
+        hours_used/imputed for the ids and returns {id: dollars}."""
+        sub = {i: hours[i] for i in ids}
+        real = [h for h in sub.values() if h is not None]
+        avg = (sum(real) / len(real)) if real else None
+        w = {}
+        for i, h in sub.items():
+            if h is not None:
+                w[i] = h
+                hours_used[i] = round(h, 2)
+                imputed[i] = False
+            elif avg is not None:
+                w[i] = avg
+                hours_used[i] = round(avg, 2)
+                imputed[i] = True
+            else:
+                w[i] = 1.0
+                hours_used[i] = 0.0
+                imputed[i] = True
+        total_w = sum(w.values()) or 1.0
+        out, running, ordered = {}, 0.0, list(ids)
+        for idx, i in enumerate(ordered):
+            if idx < len(ordered) - 1:
+                d = round(amount * (w[i] / total_w), 2)
+                running += d
+            else:
+                d = round(amount - running, 2)  # last absorbs rounding remainder
+            out[i] = d
+        return out
+
+    all_ids = [p['staff_id'] for p in participants]
+
+    if model == 'keep_own':
+        basis = 'keep_own'
+        for sid in all_ids:
+            shares[sid] = round(own[sid], 2)
+            hours_used[sid] = round(hours[sid], 2) if hours[sid] is not None else 0.0
+            imputed[sid] = False
+
+    elif model == 'tipout_pct':
+        basis = 'tipout'
+        c.execute('SELECT tipout_rate FROM venue_config WHERE id = 1')
+        rcfg = c.fetchone()
+        rate = _normalize_tipout_rate(rcfg['tipout_rate'] if rcfg else 0)
+        roles = {p['staff_id']: p['role'] for p in participants}
+        support_ids = [i for i in all_ids if roles.get(i) in TIPOUT_SUPPORT_ROLES]
+        # Contributors give up `rate` of their own tips IF there's support to receive it.
+        tipout_pool = 0.0
+        for sid in all_ids:
+            if roles.get(sid) in TIPOUT_CONTRIBUTE_ROLES and support_ids:
+                contrib = round(own[sid] * rate, 2)
+                shares[sid] = round(own[sid] - contrib, 2)
+                tipout_pool += contrib
+            else:
+                # Non-contributors (and contributors when no support present) keep own.
+                shares[sid] = round(own[sid], 2)
+            hours_used[sid] = round(hours[sid], 2) if hours[sid] is not None else 0.0
+            imputed[sid] = False
+        if support_ids and tipout_pool > 0:
+            for sid, d in _hours_weighted(support_ids, round(tipout_pool, 2)).items():
+                shares[sid] = round(shares.get(sid, 0.0) + d, 2)
+
+    else:  # equal_pool (default)
+        model = 'equal_pool'
+        dist = _hours_weighted(all_ids, pool_total)
+        real = [h for h in hours.values() if h is not None]
+        basis = 'hours' if real else 'even'
+        for sid in all_ids:
+            shares[sid] = dist[sid]
 
     # Persist: clear any prior calc for this event, then insert fresh rows.
     c.execute('DELETE FROM tip_distributions WHERE event_id = ?', (event_id,))
-
-    rows, running = [], 0.0
-    for i, p in enumerate(participants):
+    rows = []
+    for p in participants:
         sid = p['staff_id']
-        w = weights[sid]
-        if i < len(participants) - 1:
-            share = round(pool_total * (w / total_w), 2)
-            running += share
-        else:
-            share = round(pool_total - running, 2)  # last row absorbs rounding remainder
+        share = shares.get(sid, 0.0)
+        hu = hours_used.get(sid, 0.0)
+        im = 1 if imputed.get(sid) else 0
         c.execute('INSERT INTO tip_distributions '
                   '(id, event_id, staff_id, tip_model, hours_used, hours_imputed, '
                   'pool_total, share_amount, calculated_at) '
-                  "VALUES (?, ?, ?, 'equal_pool', ?, ?, ?, ?, ?)",
-                  (str(uuid.uuid4()), event_id, sid, round(w, 2),
-                   1 if imputed[sid] else 0, pool_total, share, now))
+                  'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                  (str(uuid.uuid4()), event_id, sid, model, hu, im,
+                   pool_total, share, now))
         rows.append({'staff_id': sid, 'name': p['name'], 'role': p['role'],
-                     'hours': round(w, 2), 'imputed': imputed[sid], 'share': share})
+                     'hours': hu, 'imputed': bool(im), 'own': round(own[sid], 2),
+                     'share': share})
 
     conn.commit()
     conn.close()
-    return {'ok': True, 'pool_total': round(pool_total, 2), 'rows': rows,
-            'basis': basis, 'error': None}
+    return {'ok': True, 'model': model, 'pool_total': round(pool_total, 2),
+            'rows': rows, 'basis': basis, 'error': None}
 
 
 def handle_tip(phone: str, body: str):
