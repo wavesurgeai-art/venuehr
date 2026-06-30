@@ -1436,19 +1436,32 @@ def staffing_detail(event_id):
         return redirect(url_for('staffing_matrix'))
 
     if request.method == 'POST':
-        staff_id = request.form.get('staff_id')
-        role = request.form.get('role')
-        if staff_id and role:
-            # Check for duplicate assignment
-            c.execute('SELECT id FROM event_staffing WHERE event_id=? AND staff_id=? AND role=?',
-                     (event_id, staff_id, role))
-            if c.fetchone():
-                flash(f'{role} is already assigned to this event.', 'error')
-            else:
-                c.execute('INSERT INTO event_staffing (id, event_id, staff_id, role, confirmed) VALUES (?, ?, ?, ?, 0)',
-                         (str(uuid.uuid4()), event_id, staff_id, role))
-                conn.commit()
-                flash(f'{role} assigned.', 'success')
+        action = request.form.get('action')
+        if action == 'confirm_staff':
+            staffing_id = request.form.get('staffing_id')
+            c.execute('UPDATE event_staffing SET confirmed=1 WHERE id=?', (staffing_id,))
+            conn.commit()
+            flash('Staff confirmed.', 'success')
+        elif action == 'remove_staff':
+            staffing_id = request.form.get('staffing_id')
+            c.execute('DELETE FROM event_staffing WHERE id=?', (staffing_id,))
+            conn.commit()
+            flash('Staff removed.', 'success')
+        else:
+            # assign_staff (default)
+            staff_id = request.form.get('staff_id')
+            role = request.form.get('role')
+            if staff_id and role:
+                # Check for duplicate assignment
+                c.execute('SELECT id FROM event_staffing WHERE event_id=? AND staff_id=? AND role=?',
+                         (event_id, staff_id, role))
+                if c.fetchone():
+                    flash(f'{role} is already assigned to this event.', 'error')
+                else:
+                    c.execute('INSERT INTO event_staffing (id, event_id, staff_id, role, confirmed) VALUES (?, ?, ?, ?, 0)',
+                             (str(uuid.uuid4()), event_id, staff_id, role))
+                    conn.commit()
+                    flash(f'{role} assigned.', 'success')
         conn.close()
         return redirect(url_for('staffing_detail', event_id=event_id))
 
