@@ -447,6 +447,9 @@ def init_db():
         "ALTER TABLE events ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'",
     ]:
         c.execute(_ddl)
+    # Track whether the post-onboarding completion email has been sent, so it
+    # fires exactly once (not on every revisit to the thanks page).
+    c.execute("ALTER TABLE staff ADD COLUMN IF NOT EXISTS completion_email_sent INTEGER NOT NULL DEFAULT 0")
     c.execute('''CREATE TABLE IF NOT EXISTS event_staffing (
         id TEXT PRIMARY KEY,
         event_id TEXT NOT NULL,
@@ -768,11 +771,9 @@ def staff_list():
         Please complete your onboarding by clicking the link below:
         {onboarding_link}
 
-        This link will take you to your Staff Uniform & Professional Conduct Agreement. After signing, you'll receive SMS instructions to complete the remaining steps.
+        This link walks you through all of your onboarding documents in one session — including your Staff Uniform & Professional Conduct Agreement, tax forms, and emergency contact. Just sign each step and you'll be guided to the next. It takes about 5-10 minutes.
 
-        📱 SMS Opt-In:
-        Before you receive shift texts, please confirm your SMS consent here:
-        https://wavesurgeai.com/sms-opt-in
+        If for any reason you have to stop before finishing, your progress is saved automatically. To pick up where you left off, simply click the same link above again — or contact your supervisor if you need a new link.
 
         If you have any questions, please contact your manager.
 
@@ -1259,9 +1260,36 @@ def onboard_thanks(token):
         conn.close()
         return "Invalid link.", 404
     done = _completed_onboarding_docs(c, staff_member)
-    conn.close()
     steps = [{'title': s['title'], 'done': s['key'] in done} for s in ONBOARDING_STEPS]
     all_done = all(st['done'] for st in steps)
+
+    # Fire the completion email exactly once, when onboarding is fully done.
+    if all_done and not staff_member['completion_email_sent'] and staff_member['email']:
+        venue_name = get_venue_name()
+        completion_body = f"""Hi {staff_member['name']},
+
+        Congratulations! You've completed your onboarding with {venue_name}. 🎉
+
+        All of your documents are signed and on file, and you're ready to be added to the schedule.
+
+        📱 Stay in the loop by text (optional):
+        For ongoing operations — shift reminders, clocking in and out, and quick updates — you can opt in to text messaging here:
+        https://wavesurgeai.com/sms-opt-in
+
+        Texting is completely optional and is never required to work with us. If you have any questions, please contact your manager.
+
+        Welcome to the team!
+        """
+        try:
+            send_email(staff_member['email'],
+                       f'Onboarding Complete — Welcome to {venue_name}!',
+                       completion_body)
+            c.execute('UPDATE staff SET completion_email_sent = 1 WHERE id = ?', (staff_member['id'],))
+            conn.commit()
+        except Exception:
+            app.logger.exception('Failed to send completion email')
+
+    conn.close()
     return render_template('onboard_thanks.html', staff=staff_member, steps=steps, all_done=all_done)
 
 @app.route('/static/uploads/<filename>')
