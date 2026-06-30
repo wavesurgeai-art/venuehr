@@ -3009,8 +3009,12 @@ def sms_webhook():
         row = c.fetchone()
         conn.close()
 
+        # RESTART: deliberate re-onboard, works from any state (mid-flow,
+        # complete, or fresh). Bypasses the already-onboarded guard.
+        if upper_body == 'RESTART':
+            answer, next_step = start_onboarding(from_number, body, force=True)
         # If user is in onboarding flow, check global commands first
-        if row and row['step'] != 'COMPLETE':
+        elif row and row['step'] != 'COMPLETE':
             # Global commands even while onboarding
             if upper_body in ('HELP', 'FAQ', '?'):
                 answer, next_step = HELP_TEXT, None
@@ -3078,7 +3082,8 @@ HELP_TEXT = ("Commands:\n"
              "START [DOB] - Begin onboarding (e.g. START 01/15/2000)\n"
              "STATUS - See your onboarding progress\n"
              "BACK - Go to previous step\n"
-             "EXIT - Exit and save progress\n"
+             "EXIT - Exit and discard your in-progress onboarding\n"
+             "RESTART - Redo onboarding from the beginning\n"
              "For other questions, I'll try to find an FAQ answer!")
 
 def get_venue_name() -> str:
@@ -3111,9 +3116,27 @@ def determine_role(age: int) -> str:
         return 'Server'
     return 'Under 18'
 
-def start_onboarding(phone: str, body: str):
-    """Initiate onboarding: parse DOB, determine role, send welcome + first question."""
-    dob_str = re.sub(r'^START\s*', '', body.strip(), flags=re.IGNORECASE).strip()
+def start_onboarding(phone: str, body: str, force: bool = False):
+    """Initiate onboarding: parse DOB, determine role, send welcome + first question.
+
+    If `force` is False, refuse to re-onboard a staffer who already has a
+    COMPLETE onboarding row (prevents Twilio's resubscribe-START and stray
+    STARTs from wiping a finished staffer back into the flow and locking them
+    out of IN/TIP/INCIDENT). They can deliberately redo it by texting RESTART.
+    """
+    if not force:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT step FROM onboarding_state WHERE phone = ?", (phone,))
+        existing = c.fetchone()
+        conn.close()
+        if existing and existing['step'] == 'COMPLETE':
+            return ("You're already onboarded and set up. \n\n"
+                    "Reply IN to clock in, OUT to clock out, TIP to log tips, "
+                    "or HELP for all commands.\n\n"
+                    "If you truly need to redo your onboarding, reply RESTART."), None
+
+    dob_str = re.sub(r'^(RE)?START\s*', '', body.strip(), flags=re.IGNORECASE).strip()
     dob = parse_dob(dob_str) if dob_str else None
 
     if not dob:
@@ -3312,14 +3335,20 @@ def get_onboarding_status(phone):
     return status, None
 
 def quit_onboarding(phone):
+    """EXIT/QUIT mid-onboarding: abandon and delete the in-flow row so it no
+    longer hijacks IN/TIP/INCIDENT routing. A COMPLETE row is left intact
+    (quitting after completion is a no-op). Staffer restarts fresh with START."""
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT step FROM onboarding_state WHERE phone = ?', (phone,))
     row = c.fetchone()
-    conn.close()
     if row and row['step'] != 'COMPLETE':
-        return ("Your progress has been saved! Reply STATUS to pick up where you left off, "
-                "or START to begin again."), None
+        c.execute('DELETE FROM onboarding_state WHERE phone = ?', (phone,))
+        conn.commit()
+        conn.close()
+        return ("You've exited onboarding and your in-progress entry was cleared. "
+                "Reply START when you're ready to begin again."), None
+    conn.close()
     return ("You've quit onboarding. Reply START when you're ready to begin again."), None
 
 def finish_onboarding(phone, data):
