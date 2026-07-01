@@ -706,6 +706,13 @@ def login_required(f):
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
+@app.route('/healthz')
+def healthz():
+    """Minimal keep-warm target for an external ping service. No DB access —
+    stays fast even if the database is briefly unreachable, and avoids adding
+    load to a page that will one day carry more than a template render."""
+    return 'ok', 200
+
 @app.route('/')
 def index():
     return render_template('index.html')
