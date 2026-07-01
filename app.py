@@ -7,7 +7,9 @@ import os
 import uuid
 import json
 import re
+import time
 import hashlib
+import threading
 from datetime import datetime, timedelta, date
 from functools import wraps
 
@@ -3092,6 +3094,40 @@ def _optin_checked(v):
     return str(v or '').strip().lower() in ('on', 'true', '1', 'yes', 'checked')
 
 
+# ─── /sms/optin abuse protection ─────────────────────────────────────────────
+# The endpoint is public and unauthenticated by design (it's a marketing-site
+# opt-in form). Two lightweight, dependency-free defenses: a honeypot field
+# bots fill in but humans never see, and a per-IP sliding-window rate limit.
+# In-memory is fine here — Render's free tier runs a single instance, and a
+# redeploy simply resets the window (acceptable for this low-volume endpoint).
+OPTIN_HONEYPOT_FIELD = 'company'
+OPTIN_RATE_LIMIT = 5        # max submissions...
+OPTIN_RATE_WINDOW = 3600    # ...per IP, per this many seconds (1 hour)
+
+_optin_rate_lock = threading.Lock()
+_optin_rate_buckets = {}    # ip -> [unix timestamps of recent requests]
+
+
+def _optin_rate_limited(ip):
+    """True if this IP has exceeded the sliding-window submission limit."""
+    now = time.time()
+    cutoff = now - OPTIN_RATE_WINDOW
+    with _optin_rate_lock:
+        bucket = _optin_rate_buckets.setdefault(ip, [])
+        while bucket and bucket[0] < cutoff:
+            bucket.pop(0)
+        if len(bucket) >= OPTIN_RATE_LIMIT:
+            return True
+        bucket.append(now)
+        # Opportunistic cleanup so the dict can't grow unbounded over uptime.
+        if len(_optin_rate_buckets) > 5000:
+            for k in list(_optin_rate_buckets.keys()):
+                b = _optin_rate_buckets[k]
+                if not b or b[-1] < cutoff:
+                    del _optin_rate_buckets[k]
+        return False
+
+
 @app.route('/sms/optin', methods=['POST', 'OPTIONS'])
 def sms_optin():
     """Store an auditable SMS opt-in from the public opt-in page.
@@ -3109,6 +3145,23 @@ def sms_optin():
 
     def reply(payload, status=200):
         return _apply_optin_cors(make_response(jsonify(payload), status))
+
+    ip = (request.headers.get('X-Forwarded-For', request.remote_addr or '')
+          .split(',')[0].strip())
+
+    # Honeypot: real users never see or fill this field. A filled value means
+    # a bot. Return a normal-looking success WITHOUT storing anything or
+    # sending any SMS/email — tipping the bot off just teaches it to adapt.
+    if (request.form.get(OPTIN_HONEYPOT_FIELD) or '').strip():
+        app.logger.info(f'SMS opt-in honeypot triggered, ignored silently: ip={ip}')
+        return reply({'ok': True, 'subscribed': False,
+                      'message': 'Thanks — your request has been received.'})
+
+    if _optin_rate_limited(ip):
+        app.logger.warning(f'SMS opt-in rate limit hit: ip={ip}')
+        return reply({'ok': False,
+                      'error': 'Too many requests from this connection. '
+                               'Please try again in a little while.'}, 429)
 
     ensure_sms_consent_schema()
 
@@ -3135,8 +3188,6 @@ def sms_optin():
     now = datetime.utcnow().isoformat()
     consented = 1 if sms_optin_checked else 0
     consented_at = now if sms_optin_checked else None
-    ip = (request.headers.get('X-Forwarded-For', request.remote_addr or '')
-          .split(',')[0].strip())
     ua = request.headers.get('User-Agent', '')[:300]
 
     try:
@@ -3294,6 +3345,14 @@ def sms_webhook():
         if next_step is not None:
             save_onboarding_state(from_number, next_step, {})
 
+        # Log what we're about to reply with — without this, a "200 OK" in
+        # Render's logs tells us the webhook ran, but not what (if anything)
+        # it tried to send. Cross-referencing Twilio's console for every
+        # silent-reply report is slow; this makes Render logs self-sufficient.
+        app.logger.info(
+            f'SMS reply to {from_number}: '
+            f'{(answer or "")[:120]!r}{"..." if answer and len(answer) > 120 else ""}')
+
         from twilio.twiml.messaging_response import MessagingResponse
         resp = MessagingResponse()
         resp.message(answer)
@@ -3362,7 +3421,7 @@ def start_onboarding(phone: str, body: str, force: bool = False):
         if existing and existing['step'] == 'COMPLETE':
             return ("You're already onboarded and set up. \n\n"
                     "Reply IN to clock in, OUT to clock out, TIP to log tips, "
-                    "or HELP for all commands.\n\n"
+                    "or FAQ for all commands.\n\n"
                     "If you truly need to redo your onboarding, reply RESTART."), None
 
     dob_str = re.sub(r'^(RE)?START\s*', '', body.strip(), flags=re.IGNORECASE).strip()
@@ -3446,7 +3505,7 @@ def handle_onboarding_state(phone: str, body: str, row):
 
     elif step == 'COMPLETE':
         return ("You've already completed your onboarding! If you have questions, "
-                "reply HELP or contact your Lead Coordinator."), None
+                "reply FAQ or contact your Lead Coordinator."), None
 
     return ("I'm not sure what step you're on. Reply STATUS to see your progress, "
             "or START to begin again."), None
@@ -3539,7 +3598,7 @@ def get_onboarding_status(phone):
     if step == 'COMPLETE':
         return (f"Onboarding Status: COMPLETE ✓\n\n"
                 f"Your onboarding is all done! Welcome to the team.\n\n"
-                f"Reply HELP if you need assistance."), None
+                f"Reply FAQ if you need assistance."), None
 
     steps_display = {
         'WELCOME': 'Welcome',
@@ -3595,7 +3654,7 @@ def finish_onboarding(phone, data):
             f"1. Check your email for a link to sign your Staff Agreement\n"
             f"2. Complete the uniform compliance form\n"
             f"3. You're ready to be added to the schedule!\n\n"
-            f"Questions? Reply HELP or contact your Lead Coordinator.\n\n"
+            f"Questions? Reply FAQ or contact your Lead Coordinator.\n\n"
             f"Welcome to the team!"), 'COMPLETE'
 
 def save_onboarding_state(phone: str, step: str, data: dict):
