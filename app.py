@@ -412,6 +412,22 @@ def init_db():
     # Existing-DB migration: add tip_model if venue_config predates this column.
     # IF NOT EXISTS is idempotent and safe to run on every boot (no tx abort).
     c.execute("ALTER TABLE venue_config ADD COLUMN IF NOT EXISTS tip_model TEXT NOT NULL DEFAULT 'equal_pool'")
+    # SMS consent — auditable opt-in record from the public sms-opt-in page.
+    # phone is UNIQUE so re-submits upsert (see /sms/optin). consented=1 means an
+    # active opt-in; the mass-SMS fan-out must read ONLY consented=1 (TCPA/A2P).
+    c.execute('''CREATE TABLE IF NOT EXISTS sms_consent (
+        id TEXT PRIMARY KEY,
+        first_name TEXT,
+        last_name TEXT,
+        phone TEXT UNIQUE,
+        email TEXT,
+        consented INTEGER NOT NULL DEFAULT 0,
+        consented_at TEXT,
+        source TEXT,
+        ip_address TEXT,
+        user_agent TEXT,
+        updated_at TEXT
+    )''')
     c.execute('''CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
         date TEXT NOT NULL,
@@ -1081,6 +1097,9 @@ def resend_link(staff_id):
 
 _onboarding_schema_ready = False
 
+# Tracks whether the sms_consent table has been ensured this process.
+_sms_consent_schema_ready = False
+
 # Tracks whether the staff.archived column has been ensured this process.
 _staff_archive_schema_ready = False
 
@@ -1131,6 +1150,48 @@ def ensure_onboarding_schema():
         _onboarding_schema_ready = True
     except Exception:
         pass  # leave flag False so the next request retries
+
+
+def ensure_sms_consent_schema():
+    """Idempotently ensure the sms_consent table exists.
+    Self-heals if a boot-time init_db did not create it (e.g. transient DB hiccup)."""
+    global _sms_consent_schema_ready
+    if _sms_consent_schema_ready:
+        return
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS sms_consent (
+            id TEXT PRIMARY KEY,
+            first_name TEXT,
+            last_name TEXT,
+            phone TEXT UNIQUE,
+            email TEXT,
+            consented INTEGER NOT NULL DEFAULT 0,
+            consented_at TEXT,
+            source TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            updated_at TEXT
+        )''')
+        conn.commit()
+        conn.close()
+        _sms_consent_schema_ready = True
+    except Exception:
+        pass  # leave flag False so the next request retries
+
+
+def get_sms_consented_numbers(c):
+    """E.164 phone numbers with an ACTIVE SMS opt-in on record.
+
+    The single source of truth for any mass-SMS fan-out. TCPA/A2P (error 30923)
+    requires that bulk texts go ONLY to numbers that affirmatively opted in, so
+    every future "message everyone" path must filter through this — never the
+    full staff roster. Returns a list of distinct E.164 strings.
+    """
+    c.execute("SELECT DISTINCT phone FROM sms_consent "
+              "WHERE consented = 1 AND phone IS NOT NULL AND phone <> ''")
+    return [r['phone'] for r in c.fetchall()]
 
 
 def _completed_onboarding_docs(c, staff_member):
@@ -3003,6 +3064,146 @@ def handle_rating(phone: str, body: str):
     return (f"✅ Rating recorded: {stars}\n"
             f"Comment: {comment if comment else '(no comment)'}\n"
             "Thank you for your feedback!"), None
+
+# ─── Public SMS opt-in capture (wavesurgeai.com/sms-opt-in) ───────────────────
+
+# Origins allowed to POST the opt-in form. The page is served from the marketing
+# site (Netlify); this endpoint lives on the app (Render) — a cross-origin POST.
+SMS_OPTIN_ALLOWED_ORIGINS = {
+    'https://wavesurgeai.com',
+    'https://www.wavesurgeai.com',
+}
+
+
+def _apply_optin_cors(resp):
+    """Echo an allow-listed Origin back so the page can read the JSON result.
+    Scoped to this endpoint only — the rest of the app stays same-origin."""
+    origin = request.headers.get('Origin', '')
+    if origin in SMS_OPTIN_ALLOWED_ORIGINS:
+        resp.headers['Access-Control-Allow-Origin'] = origin
+        resp.headers['Vary'] = 'Origin'
+        resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return resp
+
+
+def _optin_checked(v):
+    """A checkbox is 'checked' when its value is a truthy form token."""
+    return str(v or '').strip().lower() in ('on', 'true', '1', 'yes', 'checked')
+
+
+@app.route('/sms/optin', methods=['POST', 'OPTIONS'])
+def sms_optin():
+    """Store an auditable SMS opt-in from the public opt-in page.
+
+    The SMS-consent checkbox is OPTIONAL by design — carrier rule 30923 forbids
+    making SMS consent a required condition of service. So Terms acceptance is
+    required (matches the page's button gating), but the SMS box is not: an
+    unchecked submission is recorded with consented=0 and NEVER receives a text.
+    Only an affirmative opt-in (box checked) subscribes the number and triggers
+    the confirmation SMS + email. The web form itself is the express-written
+    consent record (single opt-in, legally sufficient).
+    """
+    if request.method == 'OPTIONS':
+        return _apply_optin_cors(make_response('', 204))
+
+    def reply(payload, status=200):
+        return _apply_optin_cors(make_response(jsonify(payload), status))
+
+    ensure_sms_consent_schema()
+
+    first = (request.form.get('first_name') or '').strip()
+    last = (request.form.get('last_name') or '').strip()
+    email = (request.form.get('email') or '').strip()
+    raw_phone = (request.form.get('phone') or '').strip()
+    phone = normalize_phone(raw_phone)
+
+    terms_ok = _optin_checked(request.form.get('terms'))
+    sms_optin_checked = _optin_checked(request.form.get('consent'))
+
+    # Validation (mirrors the page; the page also gates the button on terms).
+    if not terms_ok:
+        return reply({'ok': False,
+                      'error': 'Please agree to the Privacy Policy and Terms of Service.'}, 400)
+    if not (first and last and email and raw_phone):
+        return reply({'ok': False,
+                      'error': 'Please fill in your name, phone, and email.'}, 400)
+    if len(_phone_digits(phone)) != 10:
+        return reply({'ok': False,
+                      'error': 'Please enter a valid US mobile number.'}, 400)
+
+    now = datetime.utcnow().isoformat()
+    consented = 1 if sms_optin_checked else 0
+    consented_at = now if sms_optin_checked else None
+    ip = (request.headers.get('X-Forwarded-For', request.remote_addr or '')
+          .split(',')[0].strip())
+    ua = request.headers.get('User-Agent', '')[:300]
+
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        # Upsert on phone. Contact details + updated_at always refresh; consent is
+        # "upgrade-only" — once granted it stays, and the original consent
+        # timestamp is preserved. Withdrawal is handled by carrier-level STOP.
+        c.execute('''INSERT INTO sms_consent
+            (id, first_name, last_name, phone, email, consented, consented_at,
+             source, ip_address, user_agent, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (phone) DO UPDATE SET
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                email = EXCLUDED.email,
+                consented = GREATEST(sms_consent.consented, EXCLUDED.consented),
+                consented_at = COALESCE(sms_consent.consented_at, EXCLUDED.consented_at),
+                source = EXCLUDED.source,
+                ip_address = EXCLUDED.ip_address,
+                user_agent = EXCLUDED.user_agent,
+                updated_at = EXCLUDED.updated_at''',
+            (str(uuid.uuid4()), first, last, phone, email, consented, consented_at,
+             'web_optin', ip, ua, now))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        app.logger.error(f'SMS opt-in store failed for {phone}: {e}')
+        return reply({'ok': False,
+                      'error': 'Something went wrong saving your request. Please try again.'}, 500)
+
+    if sms_optin_checked:
+        # Confirmation SMS (welcome + STOP instructions) and an email receipt.
+        send_sms_alert(
+            phone,
+            "WaveSurgeAI: You're subscribed to VenueHR staff notifications. "
+            "Msg & data rates may apply. Reply STOP to opt out, HELP for help.")
+        send_email(
+            email,
+            "You're subscribed to WaveSurgeAI SMS notifications",
+            f"Hi {first},\n\n"
+            "You've opted in to receive WaveSurgeAI VenueHR staff notifications "
+            f"at {phone}.\n\n"
+            "These are operational messages only — shift reminders, schedule "
+            "updates, and availability requests. Message and data rates may apply; "
+            "message frequency varies.\n\n"
+            "Reply STOP to any text to unsubscribe at any time, or HELP for "
+            "assistance.\n\n"
+            "If you did not request this, reply STOP and you will not be texted "
+            "again.\n\n"
+            "— WaveSurgeAI · Wave Surge AI LLC")
+        app.logger.info(f'SMS opt-in recorded + confirmation sent: {phone}')
+        return reply({
+            'ok': True,
+            'subscribed': True,
+            'message': "You're subscribed. A confirmation text is on its way — "
+                       "reply STOP anytime to opt out."})
+
+    # Terms accepted but SMS box left unchecked: saved, but NOT subscribed.
+    app.logger.info(f'SMS opt-in form saved WITHOUT consent (no text sent): {phone}')
+    return reply({
+        'ok': True,
+        'subscribed': False,
+        'message': "Thanks — your info was saved, but you did not check the SMS "
+                   "consent box, so you won't receive any texts. Re-submit with "
+                   "that box checked if you'd like to subscribe."})
+
 
 @app.route('/sms/webhook', methods=['GET', 'POST'])
 def sms_webhook():
