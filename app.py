@@ -2992,15 +2992,13 @@ def handle_incident(phone: str, body: str):
 # ─── Shift Swap Request ───────────────────────────────────────────────────────
 
 def handle_swap_request(phone: str, body: str):
-    """Handle 'SWAP [event_id] [reason]' SMS command."""
-    m = re.match(r'^SWAP\s+(\S+)(?:\s+(.+))?', body.strip(), re.IGNORECASE)
-    if not m:
-        return ("To request a shift swap, reply SWAP followed by the event ID and reason.\n"
-                "Example: SWAP ABC123 Needs to attend a family event\n"
-                "Your manager will review and respond."), None
-
-    event_id = m.group(1).strip()
-    reason = (m.group(2) or 'No reason provided').strip()
+    """Handle 'SWAP [reason]' SMS command. Event is auto-resolved via
+    resolve_staff_event() (Piece 5) rather than typed by the staffer — the old
+    'SWAP [event_id] [reason]' format let staff submit against any string with
+    no check that they were even assigned to that event."""
+    m = re.match(r'^SWAP\b(?:\s+(.+))?', body.strip(), re.IGNORECASE)
+    reason = (m.group(1) if m else '') or 'No reason provided'
+    reason = reason.strip()
 
     conn = get_db()
     c = conn.cursor()
@@ -3011,6 +3009,18 @@ def handle_swap_request(phone: str, body: str):
 
     staff_id = staff['id']
     staff_name = staff['name']
+
+    status, event = resolve_staff_event(c, staff_id)
+    if status == 'none':
+        conn.close()
+        return ("You're not assigned to an event around today, so there's nothing to request "
+                "a swap for. Please contact your coordinator."), None
+    if status == 'multiple':
+        conn.close()
+        return ("You're assigned to more than one event right now, so I can't tell which "
+                "this swap request is for. Please contact your coordinator."), None
+    event_id = event['id']
+    event_name = event['name']
 
     swap_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -3023,12 +3033,12 @@ def handle_swap_request(phone: str, body: str):
     manager_phone = get_manager_phone()
     if manager_phone:
         msg = (f"🔄 SHIFT SWAP REQUEST\n\nStaff: {staff_name}\n"
-               f"Event ID: {event_id}\nReason: {reason}\n"
+               f"Event: {event_name}\nReason: {reason}\n"
                "Reply APPROVE or DENY to this request.")
         send_sms_alert(manager_phone, msg)
 
     return (f"✅ Shift swap request submitted.\n"
-            f"Event: {event_id}\nReason: {reason}\n"
+            f"Event: {event_name}\nReason: {reason}\n"
             "Your manager has been notified. You'll receive a response shortly."), None
 
 # ─── Performance Rating ───────────────────────────────────────────────────────
@@ -3043,7 +3053,6 @@ def handle_rating(phone: str, body: str):
 
     rating = int(m.group(1))
     comment = (m.group(2) or '').strip()
-    today = datetime.utcnow().strftime('%Y-%m-%d')
 
     conn = get_db()
     c = conn.cursor()
@@ -3054,13 +3063,18 @@ def handle_rating(phone: str, body: str):
 
     staff_id = staff['id']
 
-    # Find today's event
-    c.execute('''SELECT e.id, e.name FROM events e
-                 JOIN event_staffing es ON es.event_id=e.id
-                 WHERE es.staff_id=? AND es.confirmed=1 AND e.date=?
-                 LIMIT 1''', (staff_id, today))
-    event = c.fetchone()
-    event_id = event['id'] if event else None
+    # Resolve the single confirmed event in the +/-1 day window (Piece 5 — was an
+    # exact-date-only match before, which missed ratings sent the morning after).
+    status, event = resolve_staff_event(c, staff_id)
+    if status == 'none':
+        conn.close()
+        return ("You're not assigned to an event around today, so there's nothing to rate. "
+                "Please contact your coordinator."), None
+    if status == 'multiple':
+        conn.close()
+        return ("You're assigned to more than one event right now, so I can't tell which "
+                "this rating belongs to. Please contact your coordinator."), None
+    event_id = event['id']
 
     rating_id = str(uuid.uuid4())
     c.execute('''INSERT INTO performance_ratings (id, staff_id, event_id, rating, comment, recorded_at)
