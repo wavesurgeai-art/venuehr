@@ -2387,6 +2387,47 @@ def demo_mode():
     flash('Demo data ready — Willowmere Gardens, Johnson Wedding, pre-populated staff and activity.', 'success')
     return redirect(url_for('dashboard'))
 
+@app.route('/admin/debug/resolve', methods=['GET'])
+@login_required
+def debug_resolve():
+    """TEMPORARY diagnostic — dump raw staff/event_staffing/events data for a
+    phone number and show exactly what resolve_staff_event() sees. Remove once
+    the SWAP/RATE event-binding mystery is solved. Usage:
+    /admin/debug/resolve?phone=%2B12707910582"""
+    phone = request.args.get('phone', '')
+    conn = get_db()
+    c = conn.cursor()
+    out = {'phone_queried': phone}
+
+    staff = find_staff_by_phone(c, phone)
+    out['staff_found'] = dict(staff) if staff else None
+
+    if staff:
+        staff_id = staff['id']
+        c.execute('''SELECT es.id as staffing_id, es.event_id, es.role, es.confirmed,
+                            e.date, e.name, e.status
+                     FROM event_staffing es JOIN events e ON es.event_id = e.id
+                     WHERE es.staff_id = %s
+                     ORDER BY e.date''', (staff_id,))
+        out['all_staffing_rows'] = [dict(r) for r in c.fetchall()]
+
+        from datetime import datetime, timedelta
+        ref_date = datetime.utcnow().date()
+        out['server_utcnow_date'] = ref_date.strftime('%Y-%m-%d')
+        lo = (ref_date - timedelta(days=1)).strftime('%Y-%m-%d')
+        hi = (ref_date + timedelta(days=1)).strftime('%Y-%m-%d')
+        out['window_lo'] = lo
+        out['window_hi'] = hi
+
+        status, event = resolve_staff_event(c, staff_id)
+        out['resolve_staff_event_status'] = status
+        out['resolve_staff_event_result'] = dict(event) if event else None
+
+    conn.close()
+    return {k: str(v) if not isinstance(v, (dict, list, type(None))) else v
+            for k, v in out.items()}
+
+
 @app.route('/admin/settings', methods=['GET', 'POST'])
 @login_required
 def venue_settings():
@@ -2453,10 +2494,17 @@ def send_sms_alert(to_phone: str, message: str):
 
 
 
-def resolve_staff_event(c, staff_id, ref_date=None, window_days=1):
-    """Find the single event a staffer is confirmed on, within +/- window_days
-    of ref_date (defaults to today). Supports night-before setup and
-    night-after teardown without binding to an exact event date.
+def resolve_staff_event(c, staff_id, ref_date=None, window_days=1,
+                         lookback_days=None, lookahead_days=None):
+    """Find the single event a staffer is confirmed on, within a window around
+    ref_date (defaults to today). By default the window is symmetric
+    (+/- window_days) — this supports night-before setup and night-after
+    teardown without binding to an exact event date (used by clock-in/out,
+    TIP, INCIDENT).
+
+    Pass lookback_days/lookahead_days to use an asymmetric window instead —
+    e.g. SWAP uses lookback_days=0, lookahead_days=14, since a swap request is
+    made in advance of an event, not on the day of it.
 
     Returns (status, event) where status is:
       'ok'       -> exactly one match; event is the row {id, name, date}
@@ -2468,8 +2516,12 @@ def resolve_staff_event(c, staff_id, ref_date=None, window_days=1):
         ref_date = datetime.utcnow().date()
     elif isinstance(ref_date, str):
         ref_date = datetime.strptime(ref_date[:10], '%Y-%m-%d').date()
-    lo = (ref_date - timedelta(days=window_days)).strftime('%Y-%m-%d')
-    hi = (ref_date + timedelta(days=window_days)).strftime('%Y-%m-%d')
+    if lookback_days is None:
+        lookback_days = window_days
+    if lookahead_days is None:
+        lookahead_days = window_days
+    lo = (ref_date - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+    hi = (ref_date + timedelta(days=lookahead_days)).strftime('%Y-%m-%d')
     c.execute('''SELECT e.id, e.name, e.date FROM events e
                  JOIN event_staffing es ON es.event_id = e.id
                  WHERE es.staff_id = ? AND es.confirmed = 1
@@ -2991,14 +3043,45 @@ def handle_incident(phone: str, body: str):
 
 # ─── Shift Swap Request ───────────────────────────────────────────────────────
 
+def _parse_swap_date(date_str: str, today):
+    """Parse a staff-typed date like '7/15', '07-15', or '7/15/2026' for the
+    SWAP-with-date fallback. Missing year defaults to today's year, rolling to
+    next year if that would land more than a week in the past (handles
+    swap requests typed near a Dec->Jan boundary)."""
+    m = re.match(r'^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$', date_str.strip())
+    if not m:
+        return None
+    month, day, year = int(m.group(1)), int(m.group(2)), m.group(3)
+    if year:
+        year = int(year)
+        if year < 100:
+            year += 2000
+    else:
+        year = today.year
+    try:
+        d = datetime(year, month, day).date()
+    except ValueError:
+        return None
+    if not m.group(3) and d < today - timedelta(days=7):
+        d = d.replace(year=year + 1)
+    return d
+
+
 def handle_swap_request(phone: str, body: str):
-    """Handle 'SWAP [reason]' SMS command. Event is auto-resolved via
-    resolve_staff_event() (Piece 5) rather than typed by the staffer — the old
-    'SWAP [event_id] [reason]' format let staff submit against any string with
-    no check that they were even assigned to that event."""
-    m = re.match(r'^SWAP\b(?:\s+(.+))?', body.strip(), re.IGNORECASE)
-    reason = (m.group(1) if m else '') or 'No reason provided'
-    reason = reason.strip()
+    """Handle 'SWAP [reason]' SMS command, auto-resolving the event via
+    resolve_staff_event() (Piece 5) rather than a typed event ID — the old
+    'SWAP [event_id] [reason]' format let staff submit against any string
+    with no check that they were even assigned to that event.
+
+    Swap requests are made in advance, not on the day of an event, so this
+    looks forward up to 14 days (today through +14) rather than the tight
+    +/-1 day window TIP/INCIDENT/clock-in use. If that turns up more than one
+    confirmed event, staff can specify which with 'SWAP [date] [reason]',
+    e.g. 'SWAP 7/15 Need to leave early'."""
+    stripped = body.strip()
+    date_match = re.match(r'^SWAP\s+(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\b(?:\s+(.+))?$',
+                           stripped, re.IGNORECASE)
+    plain_match = re.match(r'^SWAP\b(?:\s+(.+))?', stripped, re.IGNORECASE)
 
     conn = get_db()
     c = conn.cursor()
@@ -3009,16 +3092,39 @@ def handle_swap_request(phone: str, body: str):
 
     staff_id = staff['id']
     staff_name = staff['name']
+    today = datetime.utcnow().date()
 
-    status, event = resolve_staff_event(c, staff_id)
-    if status == 'none':
-        conn.close()
-        return ("You're not assigned to an event around today, so there's nothing to request "
-                "a swap for. Please contact your coordinator."), None
-    if status == 'multiple':
-        conn.close()
-        return ("You're assigned to more than one event right now, so I can't tell which "
-                "this swap request is for. Please contact your coordinator."), None
+    if date_match:
+        target_date = _parse_swap_date(date_match.group(1), today)
+        reason = (date_match.group(2) or 'No reason provided').strip()
+        if target_date is None:
+            conn.close()
+            return ("I couldn't understand that date. Reply SWAP followed by a date like "
+                    "7/15 and your reason.\nExample: SWAP 7/15 Need to leave early"), None
+        status, event = resolve_staff_event(c, staff_id, ref_date=target_date,
+                                             lookback_days=0, lookahead_days=0)
+        if status == 'none':
+            conn.close()
+            return (f"You're not confirmed on any event on {target_date.strftime('%-m/%-d')}. "
+                    "Please contact your coordinator."), None
+        if status == 'multiple':
+            conn.close()
+            return (f"You're assigned to more than one event on {target_date.strftime('%-m/%-d')}, "
+                    "so I can't tell which this is for. Please contact your coordinator."), None
+    else:
+        reason = (plain_match.group(1) if plain_match else '') or 'No reason provided'
+        reason = reason.strip()
+        status, event = resolve_staff_event(c, staff_id, lookback_days=0, lookahead_days=14)
+        if status == 'none':
+            conn.close()
+            return ("You don't have any confirmed events in the next two weeks, so there's "
+                    "nothing to request a swap for. Please contact your coordinator."), None
+        if status == 'multiple':
+            conn.close()
+            return ("You have more than one confirmed event in the next two weeks, so I can't "
+                    "tell which this is for. Reply SWAP [date] [reason] to specify.\n"
+                    "Example: SWAP 7/15 Need to leave early"), None
+
     event_id = event['id']
     event_name = event['name']
 
