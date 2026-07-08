@@ -547,14 +547,6 @@ def init_db():
         reported_at TEXT NOT NULL,
         FOREIGN KEY (staff_id) REFERENCES staff(id)
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS venue_settings (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        tip_pool_enabled INTEGER NOT NULL DEFAULT 0,
-        tipout_rate REAL NOT NULL DEFAULT 20.0,
-        manager_phone TEXT,
-        venue_address TEXT,
-        venue_phone TEXT
-    )''')
     c.execute('''CREATE TABLE IF NOT EXISTS shift_swap_requests (
         id TEXT PRIMARY KEY,
         staff_id TEXT NOT NULL,
@@ -604,7 +596,14 @@ def init_db():
     conn.commit()  # commit schema before seeding so table creation is durable
     # Seed default venue config
     c.execute('INSERT OR IGNORE INTO venue_config (id, venue_name) VALUES (1, ?)', ('Our Venue',))
-    c.execute('INSERT OR IGNORE INTO venue_settings (id, tip_pool_enabled, tipout_rate) VALUES (1, 0, 20.0)')
+    # venue_settings retired (2026-07) -- venue_config is the single source of
+    # truth for venue-level config. This table was only ever written to once,
+    # at boot, with no manager_phone value -- meaning get_manager_phone() had
+    # been silently reading a permanently-NULL column for as long as it
+    # existed, so no manager SMS alert (incident/swap/broadcast) ever went
+    # out regardless of what was entered in Admin Settings. Drop is idempotent
+    # -- a no-op once already dropped.
+    c.execute('DROP TABLE IF EXISTS venue_settings')
     # Create default admin if none exists (PIN: 1234)
     c.execute('SELECT id FROM admins LIMIT 1')
     if c.fetchone() is None:
@@ -2430,8 +2429,10 @@ def debug_resolve():
 
 @app.route('/admin/settings', methods=['GET', 'POST'])
 @login_required
-def venue_settings():
-    """Manage venue settings."""
+def admin_settings():
+    """Manage venue settings. (Renamed from venue_settings() -- the identical
+    name to the now-retired venue_settings table was part of what made the
+    manager_phone table-mismatch bug easy to miss.)"""
     conn = get_db()
     c = conn.cursor()
     if request.method == 'POST':
@@ -2459,7 +2460,7 @@ TWILIO_MESSAGING_SERVICE_SID = os.environ.get('TWILIO_MESSAGING_SERVICE_SID', ''
 def get_manager_phone() -> str:
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT manager_phone FROM venue_settings WHERE id = 1')
+    c.execute('SELECT manager_phone FROM venue_config WHERE id = 1')
     row = c.fetchone()
     conn.close()
     return row['manager_phone'] if row and row['manager_phone'] else None
