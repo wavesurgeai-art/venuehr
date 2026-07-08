@@ -2429,10 +2429,8 @@ def debug_resolve():
 
 @app.route('/admin/settings', methods=['GET', 'POST'])
 @login_required
-def admin_settings():
-    """Manage venue settings. (Renamed from venue_settings() -- the identical
-    name to the now-retired venue_settings table was part of what made the
-    manager_phone table-mismatch bug easy to miss.)"""
+def venue_settings():
+    """Manage venue settings."""
     conn = get_db()
     c = conn.cursor()
     if request.method == 'POST':
