@@ -29,6 +29,9 @@
             </p>
         </div>
         <div class="flex flex-col items-end gap-3">
+            {% if staff.archived %}
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-200 text-gray-700">Archived</span>
+            {% endif %}
             {% if staff.agreement_status == 'signed' %}
             <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800">Agreement Signed</span>
             {% elif staff.agreement_status == 'pending' %}
@@ -117,6 +120,16 @@
         {% endif %}
         {% if staff.agreement_status == 'signed' %}
         <a href="{{ url_for('view_agreement', staff_id=staff.id) }}" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">View Signed Agreement</a>
+        {% endif %}
+        {% if staff.archived %}
+        <form method="POST" action="{{ url_for('restore_staff', staff_id=staff.id) }}" class="ml-auto">
+            <button type="submit" class="bg-white border border-emerald-300 text-emerald-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-50">Restore to Active Roster</button>
+        </form>
+        {% else %}
+        <form method="POST" action="{{ url_for('archive_staff', staff_id=staff.id) }}" class="ml-auto"
+              onsubmit="return confirm('Archive {{ staff.name }}? All records (signed docs, timesheets) are retained and they can be restored anytime from the Archived view.');">
+            <button type="submit" class="bg-white border border-gray-300 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50">Archive Staff</button>
+        </form>
         {% endif %}
     </div>
 </div>
