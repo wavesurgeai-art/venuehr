@@ -52,6 +52,7 @@
                 <th class="pb-2">Role</th>
                 <th class="pb-2">Step</th>
                 <th class="pb-2">Last Updated</th>
+                <th class="pb-2 text-right">Actions</th>
             </tr>
         </thead>
         <tbody class="divide-y">
@@ -67,6 +68,13 @@
                     {% endif %}
                 </td>
                 <td class="py-2 text-gray-500">{{ s.updated_at[:16] }}</td>
+                <td class="py-2 text-right">
+                    <form method="POST" action="{{ url_for('delete_sms_onboarding_record') }}" class="inline"
+                          onsubmit="return confirm('Delete the SMS onboarding record for {{ s.phone }}? They can text START to begin again.');">
+                        <input type="hidden" name="phone" value="{{ s.phone }}">
+                        <button type="submit" class="text-xs font-medium text-red-600 hover:text-red-700">Delete</button>
+                    </form>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
