@@ -913,6 +913,7 @@ def purge_staff(staff_id):
 @login_required
 def staff_detail(staff_id):
     ensure_onboarding_schema()
+    ensure_staff_archive_schema()   # guarantees staff.archived exists for the template
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT * FROM staff WHERE id = ?', (staff_id,))
@@ -2386,6 +2387,172 @@ def demo_mode():
     flash('Demo data ready — Willowmere Gardens, Johnson Wedding, pre-populated staff and activity.', 'success')
     return redirect(url_for('dashboard'))
 
+# ─── Demo-data cleanup ────────────────────────────────────────────────────────
+# All demo staff seeded by /admin/seed and /demo use deterministic, prefixed IDs,
+# so cleanup targets an explicit ID list — a real staffer added via the UI gets a
+# random UUID and can never collide with these.
+DEMO_STAFF_IDS = (
+    ['owner-001', 'coord-001', 'admin-001', 'lead-001',
+     'sec-001', 'sec-002', 'secbart-001', 'secserv-001', 'secserv-002']
+    + [f'bart-{i:03d}' for i in range(1, 9)]      # bart-001 .. bart-008
+    + [f'serv-{i:03d}' for i in range(1, 17)]     # serv-001 .. serv-016
+    + [f'cont-{i:03d}' for i in range(1, 16)]     # cont-001 .. cont-015
+)
+DEMO_EVENT_NAME = 'Johnson Wedding Reception'
+
+@app.route('/admin/cleanup-demo-data', methods=['GET'])
+@login_required
+def cleanup_demo_data():
+    """Purge all demo/seed data from the shared tables.
+
+    GET without ?confirm=yes  -> dry-run preview (counts only, deletes nothing).
+    GET with    ?confirm=yes  -> performs the purge.
+
+    Idempotent: re-running after a purge finds nothing and deletes nothing.
+    Deletion is strictly child-before-parent. venue_config is intentionally
+    NOT touched (venue_name decision pending) — it is only reported.
+    """
+    conn = get_db()
+    c = conn.cursor()
+
+    # ── Discover what demo data is present ────────────────────────────────────
+    sph = ','.join(['?'] * len(DEMO_STAFF_IDS))
+    c.execute(f'SELECT id, phone FROM staff WHERE id IN ({sph})', DEMO_STAFF_IDS)
+    staff_rows = c.fetchall()
+    staff_ids = [r['id'] for r in staff_rows]
+    staff_phones = []
+    for r in staff_rows:
+        p = r['phone'] or ''
+        if p:
+            staff_phones.append(p)
+            norm = normalize_phone(p)
+            if norm and norm != p:
+                staff_phones.append(norm)
+
+    c.execute('SELECT id FROM events WHERE name = ?', (DEMO_EVENT_NAME,))
+    event_ids = [r['id'] for r in c.fetchall()]
+
+    EVENT_CHILD_TABLES = ('tip_distributions', 'tip_entries', 'timesheet_entries',
+                          'event_staffing', 'shift_swap_requests',
+                          'performance_ratings', 'incidents')
+    STAFF_CHILD_TABLES = ('onboarding_documents', 'staff_profiles', 'agreements',
+                          'event_staffing', 'timesheet_entries', 'tip_entries',
+                          'tip_distributions', 'shift_swap_requests',
+                          'performance_ratings', 'incidents')
+
+    # ── Count phase (used by both preview and post-purge report) ──────────────
+    counts = {}
+    def _count(label, sql, params):
+        try:
+            c.execute(sql, params)
+            counts[label] = c.fetchone()[0]
+        except Exception:
+            counts[label] = 0
+
+    if event_ids:
+        eph = ','.join(['?'] * len(event_ids))
+        for tbl in EVENT_CHILD_TABLES:
+            _count(f'{tbl} (by demo event)',
+                   f'SELECT COUNT(*) FROM {tbl} WHERE event_id IN ({eph})', event_ids)
+    if staff_ids:
+        iph = ','.join(['?'] * len(staff_ids))
+        for tbl in STAFF_CHILD_TABLES:
+            _count(f'{tbl} (by demo staff)',
+                   f'SELECT COUNT(*) FROM {tbl} WHERE staff_id IN ({iph})', staff_ids)
+    if staff_phones:
+        pph = ','.join(['?'] * len(staff_phones))
+        _count('onboarding_state (demo phones)',
+               f'SELECT COUNT(*) FROM onboarding_state WHERE phone IN ({pph})', staff_phones)
+    counts['events (Johnson Wedding Reception)'] = len(event_ids)
+    counts['staff (demo/seed roster)'] = len(staff_ids)
+
+    total = sum(counts.values())
+    c.execute('SELECT venue_name FROM venue_config WHERE id = 1')
+    vrow = c.fetchone()
+    venue_note = vrow['venue_name'] if vrow else '(none)'
+
+    confirmed = request.args.get('confirm') == 'yes'
+
+    if not confirmed:
+        conn.close()
+        rows_html = ''.join(
+            f"<tr><td style='padding:4px 16px 4px 0'>{label}</td>"
+            f"<td style='text-align:right;font-weight:600'>{n}</td></tr>"
+            for label, n in sorted(counts.items()) if n) or \
+            "<tr><td colspan='2' style='padding:4px 0;color:#6b7280'>Nothing found — database is already clean.</td></tr>"
+        confirm_link = (f"<p style='margin-top:24px'><a href='{url_for('cleanup_demo_data')}?confirm=yes' "
+                        f"style='background:#e11d48;color:#fff;padding:10px 20px;border-radius:8px;"
+                        f"text-decoration:none;font-weight:600'>Delete {total} record(s) now</a></p>"
+                        if total else '')
+        return (f"<html><body style='font-family:sans-serif;max-width:640px;margin:48px auto;color:#111827'>"
+                f"<h2>Demo Data Cleanup — Preview (nothing deleted yet)</h2>"
+                f"<p>The following demo/seed records were found:</p>"
+                f"<table style='border-collapse:collapse'>{rows_html}</table>"
+                f"<p style='margin-top:16px;color:#6b7280'>venue_config is not touched by this cleanup "
+                f"(current venue_name: <b>{venue_note}</b>).</p>"
+                f"{confirm_link}"
+                f"<p style='margin-top:16px'><a href='{url_for('dashboard')}'>← Back to Dashboard</a></p>"
+                f"</body></html>")
+
+    # ── Purge phase: child-before-parent, each table tolerant of absence ──────
+    deleted = {}
+    def _delete(label, sql, params):
+        try:
+            c.execute(sql, params)
+            deleted[label] = c.rowcount if c.rowcount and c.rowcount > 0 else 0
+        except Exception:
+            deleted[label] = 0
+
+    if event_ids:
+        eph = ','.join(['?'] * len(event_ids))
+        for tbl in EVENT_CHILD_TABLES:
+            _delete(tbl, f'DELETE FROM {tbl} WHERE event_id IN ({eph})', event_ids)
+    if staff_ids:
+        iph = ','.join(['?'] * len(staff_ids))
+        for tbl in STAFF_CHILD_TABLES:
+            _delete(f'{tbl} (staff)', f'DELETE FROM {tbl} WHERE staff_id IN ({iph})', staff_ids)
+    if staff_phones:
+        pph = ','.join(['?'] * len(staff_phones))
+        _delete('onboarding_state', f'DELETE FROM onboarding_state WHERE phone IN ({pph})', staff_phones)
+    if event_ids:
+        eph = ','.join(['?'] * len(event_ids))
+        _delete('events', f'DELETE FROM events WHERE id IN ({eph})', event_ids)
+    if staff_ids:
+        iph = ','.join(['?'] * len(staff_ids))
+        _delete('staff', f'DELETE FROM staff WHERE id IN ({iph})', staff_ids)
+
+    conn.commit()
+    conn.close()
+    total_deleted = sum(deleted.values())
+    flash(f'Demo data purged — {total_deleted} record(s) removed across '
+          f'{sum(1 for v in deleted.values() if v)} table(s). '
+          f'venue_config left untouched (venue_name: {venue_note}).', 'success')
+    return redirect(url_for('dashboard'))
+
+@app.route('/admin/sms-onboarding/delete', methods=['POST'])
+@login_required
+def delete_sms_onboarding_record():
+    """Delete a single SMS onboarding record (onboarding_state row) by phone.
+
+    Phone arrives via a hidden form field (not the URL path) to avoid any
+    '+'/E.164 URL-encoding pitfalls. Safe to use on stuck or junk rows — the
+    staffer can simply text START to begin again."""
+    phone = (request.form.get('phone') or '').strip()
+    if not phone:
+        flash('No phone number provided.', 'error')
+        return redirect(url_for('dashboard'))
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('DELETE FROM onboarding_state WHERE phone = ?', (phone,))
+    removed = c.rowcount if c.rowcount and c.rowcount > 0 else 0
+    conn.commit()
+    conn.close()
+    if removed:
+        flash(f'SMS onboarding record for {phone} deleted. They can text START to begin again.', 'success')
+    else:
+        flash(f'No SMS onboarding record found for {phone}.', 'error')
+    return redirect(url_for('dashboard'))
+
 @app.route('/admin/debug/resolve', methods=['GET'])
 @login_required
 def debug_resolve():
@@ -3773,15 +3940,26 @@ def finish_onboarding(phone, data):
               (datetime.utcnow().isoformat(), phone))
     conn.commit()
     conn.close()
-    name = data.get('name', 'there')
+    # Clean up the display name ("jeff hackett" -> "Jeff Hackett"); fall back
+    # gracefully if the name was never captured.
+    raw_name = (data.get('name') or '').strip()
+    name = raw_name.title() if raw_name else 'there'
+    # Wire the venue identity and manager contact from venue_config (single
+    # source of truth) instead of hardcoding "the team" / "Lead Coordinator".
+    venue_name = get_venue_name()
+    manager_phone = get_manager_phone()
+    if manager_phone:
+        contact_line = f"Questions? Reply FAQ or text your manager at {manager_phone}."
+    else:
+        contact_line = "Questions? Reply FAQ or contact your Lead Coordinator."
     return (f"Congratulations, {name}! 🎉\n\n"
             f"You've completed your onboarding!\n\n"
             f"What's next?\n"
             f"1. Check your email for a link to sign your Staff Agreement\n"
             f"2. Complete the uniform compliance form\n"
             f"3. You're ready to be added to the schedule!\n\n"
-            f"Questions? Reply FAQ or contact your Lead Coordinator.\n\n"
-            f"Welcome to the team!"), 'COMPLETE'
+            f"{contact_line}\n\n"
+            f"Welcome to the {venue_name} team!"), 'COMPLETE'
 
 def save_onboarding_state(phone: str, step: str, data: dict):
     """Persist onboarding state to DB."""
