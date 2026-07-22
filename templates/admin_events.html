@@ -139,8 +139,7 @@
                     {% endif %}
                 </td>
                 <td class="py-3 whitespace-nowrap">
-                    <a href="{{ url_for('event_edit', event_id=event.id) }}" class="text-rose-600 hover:underline">Edit</a>
-                    <a href="{{ url_for('staffing_detail', event_id=event.id) }}" class="text-rose-600 hover:underline ml-3">Staffing</a>
+                    <a href="{{ url_for('event_edit', event_id=event.id) }}" class="text-rose-600 hover:underline">Manage</a>
                     <a href="{{ url_for('event_qr', event_id=event.id) }}" class="text-rose-600 hover:underline ml-3">Rating QR</a>
                     {% if cancelled %}
                     <form method="POST" action="{{ url_for('event_cancel', event_id=event.id) }}" class="inline ml-3">
