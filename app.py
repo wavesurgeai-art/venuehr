@@ -3797,8 +3797,12 @@ def handle_onboarding_state(phone: str, body: str, row):
         return collect_payroll(phone, body, data, assigned_role, dob)
 
     elif step == 'COMPLETE':
-        return ("You've already completed your onboarding! If you have questions, "
-                "reply FAQ or contact your Lead Coordinator."), None
+        _mp = get_manager_phone()
+        _contact = (f"text your manager at {_mp}" if _mp
+                    else "contact your Lead Coordinator")
+        return (f"Your text check-in is already complete! Don't forget to e-sign "
+                f"your onboarding documents via the link in your email if you "
+                f"haven't yet. Questions? Reply FAQ or {_contact}."), None
 
     return ("I'm not sure what step you're on. Reply STATUS to see your progress, "
             "or START to begin again."), None
@@ -3953,11 +3957,12 @@ def finish_onboarding(phone, data):
     else:
         contact_line = "Questions? Reply FAQ or contact your Lead Coordinator."
     return (f"Congratulations, {name}! 🎉\n\n"
-            f"You've completed your onboarding!\n\n"
-            f"What's next?\n"
-            f"1. Check your email for a link to sign your Staff Agreement\n"
-            f"2. Complete the uniform compliance form\n"
-            f"3. You're ready to be added to the schedule!\n\n"
+            f"Your text check-in is complete!\n\n"
+            f"⚠️ ONE REQUIRED STEP LEFT:\n"
+            f"Check your email for your onboarding link and e-sign your "
+            f"document packet (Staff Agreement, I-9, W-4, and more). "
+            f"You're not fully onboarded until those are signed.\n\n"
+            f"Once that's done, you're ready to be added to the schedule!\n\n"
             f"{contact_line}\n\n"
             f"Welcome to the {venue_name} team!"), 'COMPLETE'
 
