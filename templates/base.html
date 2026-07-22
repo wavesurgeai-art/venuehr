@@ -24,7 +24,6 @@
                     <a href="{{ url_for('staff_list') }}" class="hover:text-gray-900 {% if request.endpoint and 'staff' in request.endpoint %}text-gray-900 font-medium{% endif %}">Staff</a>
                     <a href="{{ url_for('events_list') }}" class="hover:text-gray-900 {% if request.endpoint == 'events_list' %}text-gray-900 font-medium{% endif %}">Events</a>
                     <a href="{{ url_for('admin_faqs') }}" class="hover:text-gray-900 {% if request.endpoint and 'faq' in request.endpoint %}text-gray-900 font-medium{% endif %}">FAQs</a>
-                    <a href="{{ url_for('staffing_matrix') }}" class="hover:text-gray-900 {% if request.endpoint and 'staffing' in request.endpoint %}text-gray-900 font-medium{% endif %}">Staffing</a>
                     <a href="{{ url_for('timesheets') }}" class="hover:text-gray-900 {% if request.endpoint and 'timesheet' in request.endpoint %}text-gray-900 font-medium{% endif %}">Timesheets</a>
                     <a href="{{ url_for('admin_swaps') }}" class="hover:text-gray-900 {% if request.endpoint and 'swaps' in request.endpoint %}text-gray-900 font-medium{% endif %}">Swaps</a>
                     <a href="{{ url_for('admin_incidents') }}" class="hover:text-gray-900 {% if request.endpoint and 'incidents' in request.endpoint %}text-gray-900 font-medium{% endif %}">Incidents</a>
