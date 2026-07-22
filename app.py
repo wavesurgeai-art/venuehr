@@ -1526,131 +1526,23 @@ def admin_faq_delete(faq_id):
 @app.route('/admin/staffing', methods=['GET', 'POST'])
 @login_required
 def staffing_matrix():
-    """Staffing calculator and event staffing management."""
-    conn = get_db()
-    c = conn.cursor()
-
-    if request.method == 'POST':
-        action = request.form.get('action')
-        if action == 'create_event':
-            event_id = str(uuid.uuid4())
-            c.execute('''INSERT INTO events (id, date, name, guest_count, created_at)
-                         VALUES (?, ?, ?, ?, ?)''',
-                     (event_id, request.form.get('date'), request.form.get('name'),
-                      int(request.form.get('guest_count', 0)), datetime.utcnow().isoformat()))
-            conn.commit()
-            flash(f'Event created.', 'success')
-        elif action == 'assign_staff':
-            event_id = request.form.get('event_id')
-            staff_id = request.form.get('staff_id')
-            role = request.form.get('role')
-            c.execute('SELECT id FROM event_staffing WHERE event_id=? AND staff_id=?', (event_id, staff_id))
-            if not c.fetchone():
-                c.execute('INSERT INTO event_staffing (id, event_id, staff_id, role, confirmed) VALUES (?, ?, ?, ?, 0)',
-                          (str(uuid.uuid4()), event_id, staff_id, role))
-                conn.commit()
-                flash('Staff assigned.', 'success')
-        elif action == 'confirm_staff':
-            staffing_id = request.form.get('staffing_id')
-            c.execute('UPDATE event_staffing SET confirmed=1 WHERE id=?', (staffing_id,))
-            conn.commit()
-            flash('Staff confirmed.', 'success')
-        elif action == 'remove_staff':
-            staffing_id = request.form.get('staffing_id')
-            c.execute('DELETE FROM event_staffing WHERE id=?', (staffing_id,))
-            conn.commit()
-            flash('Staff removed.', 'success')
-        conn.close()
-        return redirect(url_for('staffing_matrix'))
-
-    # Load events (hide cancelled/archived from the active staffing list)
-    c.execute("SELECT * FROM events WHERE status <> 'cancelled' ORDER BY date DESC")
-    events = c.fetchall()
-
-    # Load staff pool
-    c.execute('SELECT * FROM staff ORDER BY name')
-    all_staff = c.fetchall()
-
-    conn.close()
-    return render_template('admin_staffing.html', events=events, all_staff=all_staff, admin_name=session.get('admin_name'))
+    """Legacy staffing matrix (merged into Events, Jul 2026). The old page had its
+    own 5-field event creator that silently produced degraded events (no times,
+    no tip model, no setup/teardown), which broke SMS event resolution and tip
+    defaults. Kept as a redirect stub so old bookmarks and cached nav links keep
+    working -- do NOT resurrect a create form here."""
+    return redirect(url_for('events_list'))
 
 @app.route('/admin/staffing/<event_id>', methods=['GET', 'POST'])
 @login_required
 def staffing_detail(event_id):
-    """Staffing plan for a specific event."""
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT * FROM events WHERE id=?', (event_id,))
-    event = c.fetchone()
-    if not event:
-        flash('Event not found.', 'error')
-        conn.close()
-        return redirect(url_for('staffing_matrix'))
-
-    if request.method == 'POST':
-        action = request.form.get('action')
-        if action == 'confirm_staff':
-            staffing_id = request.form.get('staffing_id')
-            c.execute('UPDATE event_staffing SET confirmed=1 WHERE id=?', (staffing_id,))
-            conn.commit()
-            flash('Staff confirmed.', 'success')
-        elif action == 'remove_staff':
-            staffing_id = request.form.get('staffing_id')
-            c.execute('DELETE FROM event_staffing WHERE id=?', (staffing_id,))
-            conn.commit()
-            flash('Staff removed.', 'success')
-        else:
-            # assign_staff (default)
-            staff_id = request.form.get('staff_id')
-            role = request.form.get('role')
-            if staff_id and role:
-                # Check for duplicate assignment
-                c.execute('SELECT id FROM event_staffing WHERE event_id=? AND staff_id=? AND role=?',
-                         (event_id, staff_id, role))
-                if c.fetchone():
-                    flash(f'{role} is already assigned to this event.', 'error')
-                else:
-                    c.execute('INSERT INTO event_staffing (id, event_id, staff_id, role, confirmed) VALUES (?, ?, ?, ?, 0)',
-                             (str(uuid.uuid4()), event_id, staff_id, role))
-                    conn.commit()
-                    flash(f'{role} assigned.', 'success')
-        conn.close()
-        return redirect(url_for('staffing_detail', event_id=event_id))
-
-    c.execute('''SELECT es.*, s.name as staff_name, s.phone as staff_phone
-                 FROM event_staffing es JOIN staff s ON es.staff_id=s.id
-                 WHERE es.event_id=?''', (event_id,))
-    assignments = c.fetchall()
-    c.execute('SELECT * FROM staff ORDER BY name')
-    all_staff = c.fetchall()
-    conn.close()
-
-    guest_count = event['guest_count']
-    # Staffing ratios
-    required = {
-        'Server': max(1, guest_count // 20),
-        'Bartender': max(1, guest_count // 50),
-        'Event Lead': 1 if guest_count > 50 else 0,
-        'Security/Parking': max(1, guest_count // 100),
-    }
-    # Compute gaps
-    assigned_by_role = {}
-    for a in assignments:
-        assigned_by_role[a['role']] = assigned_by_role.get(a['role'], 0) + 1
-    gaps = []
-    for role, needed in required.items():
-        if needed > 0:
-            have = assigned_by_role.get(role, 0)
-            if have < needed:
-                gaps.append({'role': role, 'needed': needed, 'have': have, 'short': needed - have})
-
-    return render_template('admin_staffing_detail.html', event=event, assignments=assignments,
-                           all_staff=all_staff, required=required, gaps=gaps, admin_name=session.get('admin_name'))
+    """Legacy per-event staffing page (merged into the Manage Event page, Jul 2026)."""
+    return redirect(url_for('event_edit', event_id=event_id) + '#staffing')
 
 @app.route('/admin/staffing/<event_id>/broadcast', methods=['POST'])
 @login_required
 def staffing_broadcast(event_id):
-    """Send availability SMS to all unassigned staff."""
+    """Send availability SMS to all unassigned, active staff."""
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT * FROM events WHERE id=?', (event_id,))
@@ -1658,10 +1550,13 @@ def staffing_broadcast(event_id):
     if not event:
         flash('Event not found.', 'error')
         conn.close()
-        return redirect(url_for('staffing_matrix'))
+        return redirect(url_for('events_list'))
 
+    # Active staff only -- never text archived staff (same class of bug as the
+    # Jul 7 archived-dropdown sweep; this spot was missed).
     c.execute('''SELECT s.* FROM staff s
                  WHERE s.id NOT IN (SELECT staff_id FROM event_staffing WHERE event_id=?)
+                   AND COALESCE(s.archived, 0) = 0
                  ORDER BY s.name''', (event_id,))
     unassigned = c.fetchall()
     conn.close()
@@ -1681,7 +1576,7 @@ def staffing_broadcast(event_id):
             sent += 1
 
     flash(f'Availability request sent to {sent} staff members.', 'success')
-    return redirect(url_for('staffing_detail', event_id=event_id))
+    return redirect(url_for('event_edit', event_id=event_id) + '#staffing')
 
 @app.route('/admin/events', methods=['GET', 'POST'])
 @login_required
@@ -1759,9 +1654,81 @@ def event_edit(event_id):
 
     c.execute("SELECT DISTINCT space FROM events WHERE space IS NOT NULL AND space <> '' ORDER BY space")
     spaces = [r['space'] for r in c.fetchall()]
+
+    # ── Staffing panel (merged from the old /admin/staffing/<id> page, Jul 2026) ──
+    c.execute('''SELECT es.*, s.name as staff_name, s.phone as staff_phone
+                 FROM event_staffing es JOIN staff s ON es.staff_id=s.id
+                 WHERE es.event_id=?''', (event_id,))
+    assignments = c.fetchall()
+    # Active staff only -- archived staff must not be assignable (missed spot
+    # from the Jul 7 archived-dropdown sweep).
+    c.execute('SELECT * FROM staff WHERE COALESCE(archived, 0) = 0 ORDER BY name')
+    all_staff = c.fetchall()
     conn.close()
+
+    guest_count = event['guest_count']
+    required = {
+        'Server': max(1, guest_count // 20),
+        'Bartender': max(1, guest_count // 50),
+        'Event Lead': 1 if guest_count > 50 else 0,
+        'Security/Parking': max(1, guest_count // 100),
+    }
+    assigned_by_role = {}
+    for a in assignments:
+        assigned_by_role[a['role']] = assigned_by_role.get(a['role'], 0) + 1
+    gaps = []
+    for role, needed in required.items():
+        if needed > 0:
+            have = assigned_by_role.get(role, 0)
+            if have < needed:
+                gaps.append({'role': role, 'needed': needed, 'have': have, 'short': needed - have})
+
     return render_template('admin_event_edit.html', event=event, spaces=spaces,
-                           tip_models=TIP_MODEL_CHOICES, admin_name=session.get('admin_name'))
+                           tip_models=TIP_MODEL_CHOICES,
+                           assignments=assignments, all_staff=all_staff,
+                           required=required, gaps=gaps,
+                           admin_name=session.get('admin_name'))
+
+
+@app.route('/admin/events/<event_id>/staffing', methods=['POST'])
+@login_required
+def event_staffing_action(event_id):
+    """Assign / confirm / remove staff for one event (Manage Event staffing panel)."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id FROM events WHERE id=?', (event_id,))
+    if not c.fetchone():
+        conn.close()
+        flash('Event not found.', 'error')
+        return redirect(url_for('events_list'))
+
+    action = request.form.get('action')
+    if action == 'confirm_staff':
+        c.execute('UPDATE event_staffing SET confirmed=1 WHERE id=? AND event_id=?',
+                  (request.form.get('staffing_id'), event_id))
+        conn.commit()
+        flash('Staff confirmed.', 'success')
+    elif action == 'remove_staff':
+        c.execute('DELETE FROM event_staffing WHERE id=? AND event_id=?',
+                  (request.form.get('staffing_id'), event_id))
+        conn.commit()
+        flash('Staff removed.', 'success')
+    else:
+        # assign_staff (default)
+        staff_id = request.form.get('staff_id')
+        role = request.form.get('role')
+        if staff_id and role:
+            c.execute('SELECT id FROM event_staffing WHERE event_id=? AND staff_id=? AND role=?',
+                      (event_id, staff_id, role))
+            if c.fetchone():
+                flash(f'{role} is already assigned to this event.', 'error')
+            else:
+                c.execute('INSERT INTO event_staffing (id, event_id, staff_id, role, confirmed) VALUES (?, ?, ?, ?, 0)',
+                          (str(uuid.uuid4()), event_id, staff_id, role))
+                conn.commit()
+                flash(f'{role} assigned.', 'success')
+    conn.close()
+    return redirect(url_for('event_edit', event_id=event_id) + '#staffing')
 
 
 @app.route('/admin/events/<event_id>/cancel', methods=['POST'])
@@ -4093,11 +4060,20 @@ def roadmap():
 
 def find_best_faq_answer(query: str) -> str:
     """Search FAQ database for best matching answer."""
+    # Wire the manager contact from venue_config (single source of truth);
+    # fall back to the generic wording only if no manager phone is configured.
+    manager_phone = get_manager_phone()
+    if manager_phone:
+        help_line = f"For immediate help, text your manager at {manager_phone}."
+        contact_ref = f"text your manager at {manager_phone}"
+    else:
+        help_line = "For immediate help, contact your Lead Coordinator."
+        contact_ref = "contact your Lead Coordinator"
     if not query:
         return ("Hi! Thank you for reaching out. For questions about your shift, "
                 "uniform, parking, or any other topic, please visit our FAQ page: "
                 f"{request.host_url}faq\n\n"
-                "For immediate assistance, contact your Lead Coordinator.")
+                f"{help_line}")
 
     conn = get_db()
     c = conn.cursor()
@@ -4130,9 +4106,9 @@ def find_best_faq_answer(query: str) -> str:
         header = ("Hi! Here's what I found in our FAQ:\n\n")
         return header + best_answer + (
             f"\n\nFor more questions, visit: {request.host_url}faq\n"
-            "For immediate help, contact your Lead Coordinator.")
+            f"{help_line}")
 
-    return ("I'm not sure I understood that. For help, please contact your Lead Coordinator "
+    return (f"I'm not sure I understood that. For help, please {contact_ref} "
             f"or visit our FAQ page: {request.host_url}faq")
 
 # Ensure the schema exists at import time so tables are created under gunicorn
