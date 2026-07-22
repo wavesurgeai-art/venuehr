@@ -716,9 +716,61 @@ def healthz():
 def index():
     return render_template('index.html')
 
+# ─── Login brute-force throttle ───────────────────────────────────────────────
+# A 4-12 digit PIN is a small keyspace, so the real defense is making guessing
+# slow. Sliding-window per-IP limiter, same proven pattern as the SMS opt-in
+# limiter. Counts FAILED attempts only; a successful login clears the bucket.
+# In-memory (resets on redeploy/restart) -- acceptable: an attacker cannot
+# trigger restarts, and legitimate lockouts self-heal.
+LOGIN_RATE_LIMIT = 5          # max failed attempts...
+LOGIN_RATE_WINDOW = 15 * 60   # ...per IP, per this many seconds (15 minutes)
+_login_rate_buckets = {}      # ip -> [unix timestamps of recent failures]
+_login_rate_lock = threading.Lock()
+
+
+def _login_rate_limited(ip):
+    """True if this IP has too many recent failed logins (check only)."""
+    now = time.time()
+    cutoff = now - LOGIN_RATE_WINDOW
+    with _login_rate_lock:
+        bucket = _login_rate_buckets.get(ip, [])
+        while bucket and bucket[0] < cutoff:
+            bucket.pop(0)
+        return len(bucket) >= LOGIN_RATE_LIMIT
+
+
+def _login_record_failure(ip):
+    """Record one failed login attempt for this IP."""
+    now = time.time()
+    cutoff = now - LOGIN_RATE_WINDOW
+    with _login_rate_lock:
+        bucket = _login_rate_buckets.setdefault(ip, [])
+        while bucket and bucket[0] < cutoff:
+            bucket.pop(0)
+        bucket.append(now)
+        # Opportunistic cleanup so the dict can't grow unbounded over uptime.
+        if len(_login_rate_buckets) > 5000:
+            for k in list(_login_rate_buckets.keys()):
+                b = _login_rate_buckets[k]
+                if not b or b[-1] < cutoff:
+                    del _login_rate_buckets[k]
+
+
+def _login_clear_failures(ip):
+    """Successful login wipes the failure bucket for this IP."""
+    with _login_rate_lock:
+        _login_rate_buckets.pop(ip, None)
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
+        ip = (request.headers.get('X-Forwarded-For', request.remote_addr or '')
+              .split(',')[0].strip())
+        if _login_rate_limited(ip):
+            app.logger.warning(f'Login rate limit hit: ip={ip}')
+            flash('Too many failed attempts. Please wait about 15 minutes and try again.', 'error')
+            return render_template('login.html')
         pin = request.form.get('pin', '')
         conn = get_db()
         c = conn.cursor()
@@ -726,10 +778,12 @@ def login():
         admin = c.fetchone()
         conn.close()
         if admin and bcrypt.checkpw(pin.encode('utf-8'), admin['pin_hash'].encode('utf-8')):
+            _login_clear_failures(ip)
             session['admin_id'] = admin['id']
             session['admin_name'] = admin['name']
             flash('Welcome back!', 'success')
             return redirect(url_for('dashboard'))
+        _login_record_failure(ip)
         flash('Invalid PIN. Please try again.', 'error')
     return render_template('login.html')
 
@@ -2614,6 +2668,44 @@ def venue_settings():
     row = c.fetchone()
     conn.close()
     return render_template('admin_settings.html', settings=row, admin_name=session.get('admin_name'))
+
+@app.route('/admin/settings/pin', methods=['POST'])
+@login_required
+def change_admin_pin():
+    """Change the admin login PIN. Requires the current PIN, plus the new PIN
+    entered twice. New PIN must be 4-12 digits (6+ recommended). Hash pattern
+    matches login: bcrypt over the utf-8 PIN string."""
+    current_pin = request.form.get('current_pin', '')
+    new_pin = (request.form.get('new_pin') or '').strip()
+    confirm_pin = (request.form.get('confirm_pin') or '').strip()
+
+    if not new_pin.isdigit() or not (4 <= len(new_pin) <= 12):
+        flash('New PIN must be 4-12 digits (6 or more recommended).', 'error')
+        return redirect(url_for('venue_settings'))
+    if new_pin != confirm_pin:
+        flash('New PIN entries do not match.', 'error')
+        return redirect(url_for('venue_settings'))
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id, pin_hash FROM admins LIMIT 1')
+    admin = c.fetchone()
+    if not admin or not bcrypt.checkpw(current_pin.encode('utf-8'),
+                                       admin['pin_hash'].encode('utf-8')):
+        conn.close()
+        flash('Current PIN is incorrect.', 'error')
+        return redirect(url_for('venue_settings'))
+    if new_pin == current_pin:
+        conn.close()
+        flash('New PIN must be different from the current PIN.', 'error')
+        return redirect(url_for('venue_settings'))
+
+    new_hash = bcrypt.hashpw(new_pin.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    c.execute('UPDATE admins SET pin_hash = ? WHERE id = ?', (new_hash, admin['id']))
+    conn.commit()
+    conn.close()
+    flash('Admin PIN changed. Use the new PIN at your next login.', 'success')
+    return redirect(url_for('venue_settings'))
 
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
