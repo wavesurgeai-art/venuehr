@@ -1129,6 +1129,107 @@ def view_onboarding_doc(staff_id, doc_type):
     return render_template('view_onboarding_doc.html', staff=staff_member, doc=doc, step=step,
                            field_rows=field_rows, admin_name=session.get('admin_name'))
 
+def _phone_digits(p):
+    """Last 10 digits of a phone number for tolerant matching (landmine:
+    format mismatches cause silent lookup failures — never compare raw strings)."""
+    if not p:
+        return ''
+    d = ''.join(ch for ch in p if ch.isdigit())
+    return d[-10:]
+
+
+@app.route('/admin/staff/message')
+@login_required
+def message_staff():
+    """Compose page for venue-wide staff announcements (email + optional SMS).
+
+    SMS fan-out is ALWAYS the audience-intersect-consent set via
+    get_sms_consented_numbers() — never the raw roster (TCPA/A2P rule)."""
+    ensure_sms_consent_schema()
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT role, employment_type, agreement_status, email, phone FROM staff "
+              "WHERE COALESCE(archived, 0) = 0")
+    rows = c.fetchall()
+    consented = {_phone_digits(p) for p in get_sms_consented_numbers(c)}
+    consented.discard('')
+    conn.close()
+    roles = sorted({(r['role'] or 'other') for r in rows})
+    # PII-free aggregate rows for the live recipient counter (no names/contacts).
+    staff_meta = [{
+        's': 'active' if r['agreement_status'] == 'signed' else 'pending',
+        'r': r['role'] or 'other',
+        't': r['employment_type'] or 'w2',
+        'e': 1 if (r['email'] or '').strip() else 0,
+        'c': 1 if _phone_digits(r['phone']) in consented else 0,
+    } for r in rows]
+    return render_template('message_staff.html', roles=roles, staff_meta=staff_meta,
+                           admin_name=session.get('admin_name'))
+
+
+@app.route('/admin/staff/message/send', methods=['POST'])
+@login_required
+def message_staff_send():
+    """Send a venue-wide announcement to the filtered audience."""
+    audience = request.form.get('audience', 'active')
+    role = request.form.get('role', 'all')
+    emp = request.form.get('emp', 'all')
+    subject = (request.form.get('subject') or '').strip()
+    body = (request.form.get('body') or '').strip()
+    include_sms = request.form.get('send_sms') == '1'
+    if not subject or not body:
+        flash('Subject and message are both required.', 'error')
+        return redirect(url_for('message_staff'))
+
+    ensure_sms_consent_schema()
+    conn = get_db()
+    c = conn.cursor()
+    q = "SELECT * FROM staff WHERE COALESCE(archived, 0) = 0"
+    params = []
+    if audience == 'active':
+        q += " AND agreement_status = 'signed'"
+    if role != 'all':
+        q += " AND role = ?"
+        params.append(role)
+    if emp in ('w2', 'contractor'):
+        q += " AND COALESCE(employment_type, 'w2') = ?"
+        params.append(emp)
+    c.execute(q, params)
+    recipients = c.fetchall()
+    consented = {_phone_digits(p) for p in get_sms_consented_numbers(c)} if include_sms else set()
+    consented.discard('')
+    conn.close()
+
+    venue_name = get_venue_name()
+    email_ok = email_fail = sms_queued = 0
+    for r in recipients:
+        if (r['email'] or '').strip():
+            ok = send_email(r['email'], subject,
+                            f"Hi {r['name']},\n\n{body}\n\n— {venue_name}")
+            if ok:
+                email_ok += 1
+            else:
+                email_fail += 1
+    if include_sms:
+        seen = set()
+        for r in recipients:
+            d = _phone_digits(r['phone'])
+            if d and d in consented and d not in seen:
+                seen.add(d)
+                send_sms_alert(r['phone'], f"{venue_name}: {body}")
+                sms_queued += 1
+
+    summary = f'Email sent to {email_ok} staff'
+    if email_fail:
+        summary += f' ({email_fail} failed — check Render logs)'
+    if include_sms:
+        summary += f' · SMS queued to {sms_queued} consented staff'
+    flash(summary + '.', 'success')
+    app.logger.info(f'Mass message "{subject}": audience={audience} role={role} emp={emp} '
+                    f'email_ok={email_ok} email_fail={email_fail} sms={sms_queued}')
+    return redirect(url_for('staff_list'))
+
+
 @app.route('/admin/staff/<staff_id>/resend-link', methods=['POST'])
 @login_required
 def resend_link(staff_id):
@@ -1728,6 +1829,67 @@ def event_staffing_action(event_id):
                 conn.commit()
                 flash(f'{role} assigned.', 'success')
     conn.close()
+    return redirect(url_for('event_edit', event_id=event_id) + '#staffing')
+
+
+@app.route('/admin/events/<event_id>/message', methods=['POST'])
+@login_required
+def event_crew_message(event_id):
+    """Message everyone assigned to one event (email + optional SMS to consented)."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM events WHERE id=?', (event_id,))
+    event = c.fetchone()
+    if not event:
+        conn.close()
+        flash('Event not found.', 'error')
+        return redirect(url_for('events_list'))
+
+    subject = (request.form.get('subject') or '').strip()
+    body = (request.form.get('body') or '').strip()
+    include_sms = request.form.get('send_sms') == '1'
+    if not subject or not body:
+        conn.close()
+        flash('Subject and message are both required.', 'error')
+        return redirect(url_for('event_edit', event_id=event_id) + '#crew-message')
+
+    ensure_sms_consent_schema()
+    c.execute('''SELECT DISTINCT s.* FROM event_staffing es
+                 JOIN staff s ON es.staff_id = s.id
+                 WHERE es.event_id = ? AND COALESCE(s.archived, 0) = 0''', (event_id,))
+    crew = c.fetchall()
+    consented = {_phone_digits(p) for p in get_sms_consented_numbers(c)} if include_sms else set()
+    consented.discard('')
+    conn.close()
+
+    venue_name = get_venue_name()
+    email_ok = email_fail = sms_queued = 0
+    for r in crew:
+        if (r['email'] or '').strip():
+            ok = send_email(r['email'], subject,
+                            f"Hi {r['name']},\n\n{body}\n\n"
+                            f"Event: {event['name']} — {event['date']}\n\n— {venue_name}")
+            if ok:
+                email_ok += 1
+            else:
+                email_fail += 1
+    if include_sms:
+        seen = set()
+        for r in crew:
+            d = _phone_digits(r['phone'])
+            if d and d in consented and d not in seen:
+                seen.add(d)
+                send_sms_alert(r['phone'], f"{venue_name} – {event['name']}: {body}")
+                sms_queued += 1
+
+    summary = f'Email sent to {email_ok} crew members'
+    if email_fail:
+        summary += f' ({email_fail} failed — check Render logs)'
+    if include_sms:
+        summary += f' · SMS queued to {sms_queued} consented crew'
+    flash(summary + '.', 'success')
+    app.logger.info(f'Crew message for event {event_id} "{subject}": '
+                    f'email_ok={email_ok} email_fail={email_fail} sms={sms_queued}')
     return redirect(url_for('event_edit', event_id=event_id) + '#staffing')
 
 
