@@ -12,6 +12,7 @@
         {% if show_archived %}
         <a href="{{ url_for('staff_list') }}" class="text-gray-600 hover:text-gray-900 text-sm font-medium px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition">&larr; Back to Active Roster</a>
         {% else %}
+        <a href="{{ url_for('message_staff') }}" class="text-gray-600 hover:text-gray-900 text-sm font-medium px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition">✉️ Message Staff</a>
         <a href="{{ url_for('staff_list', archived=1) }}" class="text-gray-600 hover:text-gray-900 text-sm font-medium px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition">Archived{% if archived_count %} ({{ archived_count }}){% endif %}</a>
         <button onclick="document.getElementById('add-form').classList.toggle('hidden')"
                 class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700 transition">
@@ -44,6 +45,10 @@
                 <option value="bartender">Bartender</option>
                 <option value="server">Server</option>
                 <option value="coordinator">Coordinator</option>
+                <option value="caterer">Caterer</option>
+                <option value="dj">DJ</option>
+                <option value="security">Security</option>
+                <option value="photographer">Photographer</option>
                 <option value="other">Other</option>
             </select>
         </div>
