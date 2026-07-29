@@ -250,4 +250,36 @@
     <p class="text-amber-800">All roles fully staffed! ✓</p>
     {% endif %}
 </div>
+
+<!-- Message Event Crew -->
+<div id="crew-message" class="mt-6 bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+    <h3 class="text-lg font-semibold text-gray-900 mb-1">Message Event Crew</h3>
+    <p class="text-sm text-gray-500 mb-4">Email everyone assigned to this event. SMS goes only to crew with an active text opt-in on file.</p>
+    {% if assignments %}
+    <form method="POST" action="{{ url_for('event_crew_message', event_id=event.id) }}"
+          onsubmit="return confirm('Send this message to all {{ assignments|length }} assigned crew member(s)?');">
+        <div class="space-y-3">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Subject *</label>
+                <input type="text" name="subject" required maxlength="150" value="Update: {{ event.name }}"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Message *</label>
+                <textarea name="body" required rows="4" placeholder="Call time, parking, dress code, load-in details..."
+                          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"></textarea>
+            </div>
+            <label class="flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" name="send_sms" value="1" class="rounded border-gray-300">
+                Also text crew members who have SMS consent on file
+            </label>
+            <button type="submit" class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">
+                Send to Crew ({{ assignments|length }})
+            </button>
+        </div>
+    </form>
+    {% else %}
+    <p class="text-gray-400">No staff assigned yet — assign crew above to enable messaging.</p>
+    {% endif %}
+</div>
 {% endblock %}
