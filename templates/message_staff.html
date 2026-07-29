@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Message Staff — VenueHR{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center mb-8">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Message Staff</h1>
+        <p class="text-gray-500">Send an announcement to your team by email, with optional SMS to consented staff</p>
+    </div>
+    <a href="{{ url_for('staff_list') }}" class="text-gray-600 hover:text-gray-900 text-sm font-medium px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition">&larr; Back to Roster</a>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 max-w-3xl">
+    <form id="msg-form" method="POST" action="{{ url_for('message_staff_send') }}">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Audience</label>
+                <div class="space-y-2 text-sm text-gray-700">
+                    <label class="flex items-center gap-2">
+                        <input type="radio" name="audience" value="active" checked class="border-gray-300">
+                        Active staff only
+                    </label>
+                    <label class="flex items-center gap-2">
+                        <input type="radio" name="audience" value="all" class="border-gray-300">
+                        Active + pending onboarding
+                    </label>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Role</label>
+                <select id="role" name="role" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <option value="all">All roles</option>
+                    {% for r in roles %}
+                    <option value="{{ r }}">{{ 'DJ' if r == 'dj' else r|capitalize }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Type</label>
+                <select id="emp" name="emp" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <option value="all">All types</option>
+                    <option value="w2">W-2 employees only</option>
+                    <option value="contractor">Contractors only</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Subject *</label>
+            <input type="text" name="subject" required maxlength="150"
+                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Message *</label>
+            <textarea name="body" required rows="6"
+                      placeholder="Staff meeting Saturday at 9am. New parking policy. Holiday party details..."
+                      class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"></textarea>
+            <p class="text-xs text-gray-400 mt-1">Texts over ~150 characters may be split into multiple message segments.</p>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm text-gray-700 mb-4">
+            <input type="checkbox" id="send_sms" name="send_sms" value="1" class="rounded border-gray-300">
+            Also send as a text message — <span class="text-gray-500">goes only to staff with an active SMS opt-in on file</span>
+        </label>
+
+        <div class="flex items-center justify-between border-t border-gray-100 pt-4">
+            <p class="text-sm text-gray-500" id="count-line">This will email <strong id="email-count">0</strong> staff<span id="sms-part" class="hidden"> and text <strong id="sms-count">0</strong> consented staff</span>.</p>
+            <button type="submit" class="bg-rose-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">
+                Send Message
+            </button>
+        </div>
+    </form>
+</div>
+
+<script>
+const META = {{ staff_meta|tojson }};
+
+function currentCounts() {
+    const aud = document.querySelector('input[name="audience"]:checked').value;
+    const role = document.getElementById('role').value;
+    const emp = document.getElementById('emp').value;
+    let email = 0, sms = 0;
+    for (const p of META) {
+        if (aud === 'active' && p.s !== 'active') continue;
+        if (role !== 'all' && p.r !== role) continue;
+        if (emp !== 'all' && p.t !== emp) continue;
+        if (p.e) email++;
+        if (p.c) sms++;
+    }
+    return { email, sms };
+}
+
+function refreshCounts() {
+    const { email, sms } = currentCounts();
+    document.getElementById('email-count').textContent = email;
+    document.getElementById('sms-count').textContent = sms;
+    document.getElementById('sms-part').classList.toggle('hidden', !document.getElementById('send_sms').checked);
+}
+
+document.querySelectorAll('#msg-form input, #msg-form select').forEach(el => {
+    el.addEventListener('change', refreshCounts);
+});
+refreshCounts();
+
+document.getElementById('msg-form').addEventListener('submit', function (e) {
+    const { email, sms } = currentCounts();
+    const smsOn = document.getElementById('send_sms').checked;
+    let msg = 'Send this message by email to ' + email + ' staff member(s)';
+    if (smsOn) msg += ' and by text to ' + sms + ' consented staff';
+    msg += '?';
+    if (email === 0 && (!smsOn || sms === 0)) {
+        alert('No recipients match the selected filters.');
+        e.preventDefault();
+        return;
+    }
+    if (!confirm(msg)) e.preventDefault();
+});
+</script>
+{% endblock %}
