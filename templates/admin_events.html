@@ -11,7 +11,7 @@
 </datalist>
 
 <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 mb-6">
-    <details {% if not events %}open{% endif %}>
+    <details {% if not events or request.args.get('new') %}open{% endif %}>
         <summary class="text-lg font-semibold cursor-pointer select-none">Add New Event</summary>
         <form method="POST" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
             <div class="md:col-span-2">
