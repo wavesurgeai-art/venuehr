@@ -88,7 +88,7 @@
             {% for s in staff %}
             <tr data-row>
                 <td class="px-6 py-4" data-sort="{{ s.name }}">
-                    <div class="font-medium text-gray-900">{{ s.name }}</div>
+                    <a href="{{ url_for('staff_detail', staff_id=s.id) }}" class="font-medium text-gray-900 hover:text-rose-600 transition">{{ s.name }}</a>
                     <div class="text-sm text-gray-500">{{ s.email }}</div>
                 </td>
                 <td class="px-6 py-4 text-gray-700 capitalize" data-sort="{{ s.role }}">{{ s.role }}</td>
