@@ -1914,6 +1914,44 @@ def event_cancel(event_id):
     flash('Event restored.' if new_status == 'active' else 'Event cancelled (archived).', 'success')
     return redirect(url_for('events_list'))
 
+@app.route('/admin/events/<event_id>/purge', methods=['POST'])
+@login_required
+def purge_event(event_id):
+    """Hard-delete a cancelled event and ALL its records. Irreversible.
+    Reserved for genuine test/junk events (only offered on cancelled rows).
+    Destroys timesheets, tips, ratings, and staffing history -- never expose
+    this for active events. Mirrors purge_staff: guard, cascade, delete."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT name, status FROM events WHERE id = ?', (event_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        flash('Event not found.', 'error')
+        return redirect(url_for('events_list'))
+    # Guard: refuse to purge an active event -- must be cancelled first.
+    if row['status'] != 'cancelled':
+        conn.close()
+        flash('Cancel this event before deleting permanently.', 'error')
+        return redirect(url_for('events_list'))
+    name = row['name']
+    # Cascade: remove dependent records across all event-scoped tables.
+    for tbl in ('event_staffing', 'availability_requests', 'timesheet_entries',
+                'tip_entries', 'tipout_records', 'tip_distributions',
+                'incidents', 'shift_swap_requests', 'performance_ratings'):
+        try:
+            c.execute(f'DELETE FROM {tbl} WHERE event_id = ?', (event_id,))
+        except Exception:
+            pass
+    try:
+        c.execute('DELETE FROM events WHERE id = ?', (event_id,))
+    except Exception:
+        pass
+    conn.commit()
+    conn.close()
+    flash(f'"{name}" and all associated records permanently deleted.', 'success')
+    return redirect(url_for('events_list'))
+
 @app.route('/admin/timesheets', methods=['GET'])
 @login_required
 def timesheets():
