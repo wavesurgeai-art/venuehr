@@ -28,9 +28,10 @@
 {# How to report info #}
 <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-sm text-amber-800">
     <strong>ℹ️ How incidents are reported:</strong> Staff text <code class="bg-amber-100 px-1 rounded">INCIDENT [description]</code> to report an issue.
-    Severity is auto-detected: 🔴 HIGH for alcohol/emergency/critical keywords, 🟡 MEDIUM for aggressive/high, 🟢 LOW otherwise.
-    You are notified by SMS immediately.
-</div>
+    Staff may lead with HIGH, MEDIUM, or LOW to set severity directly — that always wins.
+    Otherwise it is auto-detected from whole-word keywords: 🔴 HIGH for emergency/injury/fight-type words,
+    🟡 MEDIUM for aggressive/intoxicated/theft-type words, 🟢 LOW otherwise.
+    You are notified by SMS immediately.</div>
 
 <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
     {% if incidents %}
