@@ -1643,7 +1643,30 @@ def staffing_detail(event_id):
 @app.route('/admin/staffing/<event_id>/broadcast', methods=['POST'])
 @login_required
 def staffing_broadcast(event_id):
-    """Send availability SMS to all unassigned, active staff."""
+    """Send an availability request to unassigned, active, TARGETED staff.
+
+    COMPLIANCE (TCPA / A2P 30923): SMS goes ONLY to numbers carrying an active
+    opt-in, via get_sms_consented_numbers(). This route previously looped the
+    raw roster and called send_sms_alert() directly -- send_sms_alert() has no
+    internal consent check, so non-consented staff were being texted. Never
+    reintroduce a bare `for staff in roster: send_sms_alert(...)` here.
+
+    Email is the parallel channel, not a nicety: it is the only way to reach a
+    staffer who has not opted in to SMS, and the only fallback when a phone sits
+    in a dead zone. Targeting (role / license) exists so a bartender no-show
+    does not text the photographer -- unnecessary texts drive opt-outs, and
+    opt-out rate is what gets a Messaging Service carrier-filtered.
+    """
+    role_filter = (request.form.get('role') or '').strip()
+    license_filter = (request.form.get('license_type') or '').strip()
+    include_sms = request.form.get('include_sms') == 'yes'
+    include_email = request.form.get('include_email') == 'yes'
+
+    if not include_sms and not include_email:
+        flash('Pick at least one channel -- nothing was sent.', 'error')
+        return redirect(url_for('event_edit', event_id=event_id) + '#staffing')
+
+    ensure_sms_consent_schema()
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT * FROM events WHERE id=?', (event_id,))
@@ -1653,16 +1676,32 @@ def staffing_broadcast(event_id):
         conn.close()
         return redirect(url_for('events_list'))
 
-    # Active staff only -- never text archived staff (same class of bug as the
-    # Jul 7 archived-dropdown sweep; this spot was missed).
-    c.execute('''SELECT s.* FROM staff s
-                 WHERE s.id NOT IN (SELECT staff_id FROM event_staffing WHERE event_id=?)
-                   AND COALESCE(s.archived, 0) = 0
-                 ORDER BY s.name''', (event_id,))
+    # Active + unassigned, narrowed by the chosen filters. Archived staff must
+    # never be contacted (Jul 7 archived-dropdown sweep missed this spot once).
+    sql = ['''SELECT s.* FROM staff s
+              WHERE s.id NOT IN (SELECT staff_id FROM event_staffing WHERE event_id=?)
+                AND COALESCE(s.archived, 0) = 0''']
+    params = [event_id]
+    if role_filter:
+        sql.append('AND s.role = ?')
+        params.append(role_filter)
+    if license_filter:
+        sql.append('''AND s.id IN (SELECT staff_id FROM staff_profiles
+                                   WHERE license_type = ?)''')
+        params.append(license_filter)
+    sql.append('ORDER BY s.name')
+    c.execute(' '.join(sql), tuple(params))
     unassigned = c.fetchall()
+
+    # Digit-tolerant consent set (landmine: E.164 on write, last-10 match on read)
+    consented = {_phone_digits(p) for p in get_sms_consented_numbers(c)} if include_sms else set()
+    consented.discard('')
     conn.close()
 
-    # Send SMS to each
+    if not unassigned:
+        flash('No unassigned staff matched that filter -- nobody was contacted.', 'error')
+        return redirect(url_for('event_edit', event_id=event_id) + '#staffing')
+
     venue_name = get_venue_name()
     msg = (f"Hi! {venue_name} needs staff for an upcoming event.\n\n"
            f"Event: {event['name']}\n"
@@ -1670,13 +1709,41 @@ def staffing_broadcast(event_id):
            f"Guests: {event['guest_count']}\n\n"
            f"Reply CONFIRM if you're available, or DECLINE if not.")
 
-    sent = 0
+    sms_queued = email_ok = email_fail = 0
+    unreachable = []
     for staff in unassigned:
-        if staff['phone']:
-            send_sms_alert(staff['phone'], msg)
-            sent += 1
+        reached = False
+        phone = (staff['phone'] or '').strip()
+        if include_sms and phone and _phone_digits(phone) in consented:
+            send_sms_alert(phone, msg)   # fire-and-forget: report as queued
+            sms_queued += 1
+            reached = True
+        email = (staff['email'] or '').strip()
+        if include_email and email:
+            if send_email(email, f"Staffing request -- {event['name']}",
+                          f"Hi {staff['name']},\n\n{msg}\n\n-- {venue_name}"):
+                email_ok += 1
+                reached = True
+            else:
+                email_fail += 1
+        if not reached:
+            unreachable.append(staff['name'])
 
-    flash(f'Availability request sent to {sent} staff members.', 'success')
+    bits = [f'{len(unassigned)} matched']
+    if include_sms:
+        bits.append(f'{sms_queued} SMS queued (opt-in only)')
+    if include_email:
+        bits.append(f'{email_ok} emailed')
+        if email_fail:
+            bits.append(f'{email_fail} email failed')
+    flash('Availability request: ' + ', '.join(bits) + '.', 'success')
+
+    if unreachable:
+        shown = ', '.join(unreachable[:5])
+        more = f' and {len(unreachable) - 5} more' if len(unreachable) > 5 else ''
+        flash(f'No reachable channel for {len(unreachable)}: {shown}{more}. '
+              f'Call them, or get SMS consent on file.', 'info')
+
     return redirect(url_for('event_edit', event_id=event_id) + '#staffing')
 
 @app.route('/admin/events', methods=['GET', 'POST'])
@@ -1765,6 +1832,18 @@ def event_edit(event_id):
     # from the Jul 7 archived-dropdown sweep).
     c.execute('SELECT * FROM staff WHERE COALESCE(archived, 0) = 0 ORDER BY name')
     all_staff = c.fetchall()
+    # Broadcast targeting options, derived from live data (roles are free text --
+    # there is no canonical constant, so never hardcode a list here).
+    c.execute('''SELECT DISTINCT role FROM staff
+                 WHERE COALESCE(archived, 0) = 0 AND role IS NOT NULL AND role <> ''
+                 ORDER BY role''')
+    broadcast_roles = [r['role'] for r in c.fetchall()]
+    c.execute('''SELECT DISTINCT p.license_type FROM staff_profiles p
+                 JOIN staff s ON p.staff_id = s.id
+                 WHERE COALESCE(s.archived, 0) = 0
+                   AND p.license_type IS NOT NULL AND p.license_type <> ''
+                 ORDER BY p.license_type''')
+    broadcast_licenses = [r['license_type'] for r in c.fetchall()]
     conn.close()
 
     guest_count = event['guest_count']
@@ -1788,6 +1867,8 @@ def event_edit(event_id):
                            tip_models=TIP_MODEL_CHOICES,
                            assignments=assignments, all_staff=all_staff,
                            required=required, gaps=gaps,
+                           broadcast_roles=broadcast_roles,
+                           broadcast_licenses=broadcast_licenses,
                            admin_name=session.get('admin_name'))
 
 
