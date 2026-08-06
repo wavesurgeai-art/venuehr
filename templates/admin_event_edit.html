@@ -116,11 +116,38 @@
         <p class="text-gray-500 text-sm">Assign staff, track confirmations, and fill gaps for this event</p>
     </div>
     <form method="POST" action="{{ url_for('staffing_broadcast', event_id=event.id) }}"
-          onsubmit="return confirm('Text an availability request to every unassigned active staff member?');">
+          class="flex flex-col gap-3 md:flex-row md:items-end md:flex-wrap"
+          onsubmit="return confirm('Send an availability request to the matching unassigned staff?');">
+        <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Role</label>
+            <select name="role" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="">All roles</option>
+                {% for r in broadcast_roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">License / certification</label>
+            <select name="license_type" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="">Any</option>
+                {% for l in broadcast_licenses %}<option value="{{ l }}">{{ l }}</option>{% endfor %}
+            </select>
+        </div>
+        <div class="flex items-center gap-4 text-sm text-gray-700">
+            <label class="flex items-center gap-1">
+                <input type="checkbox" name="include_sms" value="yes" checked> Text
+            </label>
+            <label class="flex items-center gap-1">
+                <input type="checkbox" name="include_email" value="yes" checked> Email
+            </label>
+        </div>
         <button type="submit" class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">
             📱 Broadcast Availability Request
         </button>
     </form>
+    <p class="text-xs text-gray-500 mt-2 md:w-full">
+        Texts reach only staff with SMS consent on file. Email reaches everyone with an address —
+        use it to catch non-consented staff and dead zones.
+    </p>
 </div>
 
 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
