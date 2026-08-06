@@ -1659,11 +1659,12 @@ def staffing_broadcast(event_id):
     """
     role_filter = (request.form.get('role') or '').strip()
     license_filter = (request.form.get('license_type') or '').strip()
+    emp_filter = (request.form.get('employment_type') or '').strip()
     include_sms = request.form.get('include_sms') == 'yes'
     include_email = request.form.get('include_email') == 'yes'
 
     if not include_sms and not include_email:
-        flash('Pick at least one channel -- nothing was sent.', 'error')
+        flash('Choose Text, Email, or both -- nothing was sent.', 'error')
         return redirect(url_for('event_edit', event_id=event_id) + '#staffing')
 
     ensure_sms_consent_schema()
@@ -1689,6 +1690,12 @@ def staffing_broadcast(event_id):
         sql.append('''AND s.id IN (SELECT staff_id FROM staff_profiles
                                    WHERE license_type = ?)''')
         params.append(license_filter)
+    # Outside vendors (florist, officiant, DJ) live on the same roster as staff.
+    # employment_type is a tax classification standing in for "is this my
+    # employee or someone else's business" -- imperfect, but it is what exists.
+    if emp_filter in ('w2', 'contractor'):
+        sql.append("AND COALESCE(s.employment_type, 'w2') = ?")
+        params.append(emp_filter)
     sql.append('ORDER BY s.name')
     c.execute(' '.join(sql), tuple(params))
     unassigned = c.fetchall()
@@ -3490,6 +3497,50 @@ def handle_tip(phone: str, body: str):
 
 # ─── Incident Handler ──────────────────────────────────────────────────────────
 
+# Default keyword -> severity map. Substring matching was the original bug:
+# "restocked the alcohol" paged the manager, and a bare "HIGH" was DOWNGRADED
+# to medium because it was checked after ALCOHOL. Matching is now whole-word,
+# and an explicit leading HIGH/MEDIUM/LOW always wins over keyword guessing.
+# NOTE: this map is a DEFAULT, not a policy. A venue in a floodplain needs
+# FLOOD at high; a dry venue may want ALCOHOL muted entirely. Make it
+# venue-editable when a pilot asks (tracker C-3).
+INCIDENT_SEVERITY_KEYWORDS = {
+    'high': ['CRITICAL', 'EMERGENCY', 'AMBULANCE', 'POLICE', 'FIRE',
+             'INJURY', 'INJURED', 'FIGHT', 'ASSAULT', 'WEAPON', 'OVERDOSE'],
+    'medium': ['AGGRESSIVE', 'INTOXICATED', 'DRUNK', 'OVERSERVED',
+               'THEFT', 'STOLEN', 'DAMAGE', 'COMPLAINT', 'HARASSMENT'],
+}
+
+_SEVERITY_PREFIX = re.compile(r'^(HIGH|MEDIUM|MED|LOW)\b[\s:,-]*', re.IGNORECASE)
+
+
+def _classify_incident(desc: str):
+    """Return (severity, cleaned_description).
+
+    Order matters. An explicit leading HIGH/MEDIUM/LOW is the staffer telling
+    us directly -- honour it and strip it from the stored text. The SMS help
+    string instructs staff to do exactly this, so the parser must not second-
+    guess them. Only when no prefix is given do we fall back to keywords, and
+    those are matched on WORD BOUNDARIES so "alcohol" inside a routine
+    inventory note does not trigger a page.
+    """
+    desc = (desc or '').strip()
+
+    m = _SEVERITY_PREFIX.match(desc)
+    if m:
+        token = m.group(1).upper()
+        severity = 'medium' if token in ('MEDIUM', 'MED') else token.lower()
+        cleaned = desc[m.end():].strip()
+        return severity, (cleaned or desc)
+
+    upper = desc.upper()
+    for level in ('high', 'medium'):
+        for kw in INCIDENT_SEVERITY_KEYWORDS[level]:
+            if re.search(r'\b' + re.escape(kw) + r'\b', upper):
+                return level, desc
+    return 'low', desc
+
+
 def handle_incident(phone: str, body: str):
     """Handle 'INCIDENT [description]' SMS command."""
     m = re.match(r'^INCIDENT\s+(.+)', body.strip(), re.IGNORECASE)
@@ -3500,13 +3551,7 @@ def handle_incident(phone: str, body: str):
                 "Example: INCIDENT HIGH Guest complaint."), None
 
     raw_desc = m.group(1).strip()
-    upper_desc = raw_desc.upper()
-    if 'CRITICAL' in upper_desc or 'EMERGENCY' in upper_desc or 'ALCOHOL' in upper_desc:
-        severity = 'high'
-    elif 'HIGH' in upper_desc or 'AGGRESSIVE' in upper_desc:
-        severity = 'medium'
-    else:
-        severity = 'low'
+    severity, raw_desc = _classify_incident(raw_desc)
 
     conn = get_db()
     c = conn.cursor()
