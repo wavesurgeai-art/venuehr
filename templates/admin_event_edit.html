@@ -132,6 +132,14 @@
                 {% for l in broadcast_licenses %}<option value="{{ l }}">{{ l }}</option>{% endfor %}
             </select>
         </div>
+        <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Worker type</label>
+            <select name="employment_type" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="">Everyone</option>
+                <option value="w2">W-2 employees only</option>
+                <option value="contractor">Contractors / vendors only</option>
+            </select>
+        </div>
         <div class="flex items-center gap-4 text-sm text-gray-700">
             <label class="flex items-center gap-1">
                 <input type="checkbox" name="include_sms" value="yes" checked> Text
