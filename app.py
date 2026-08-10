@@ -2072,10 +2072,63 @@ def admin_incidents():
     high_count = counts.get('high', 0)
     medium_count = counts.get('medium', 0)
     low_count = counts.get('low', 0)
+    c.execute('SELECT COUNT(*) as count FROM incidents WHERE event_id IS NULL')
+    unattached_count = c.fetchone()['count']
+    # Non-cancelled events for the "attach unlinked incident" dropdown.
+    c.execute('''SELECT id, name, date FROM events
+                 WHERE status != 'cancelled'
+                 ORDER BY date DESC LIMIT 50''')
+    attachable_events = c.fetchall()
     conn.close()
     return render_template('admin_incidents.html', incidents=incidents,
                           high_count=high_count, medium_count=medium_count, low_count=low_count,
+                          unattached_count=unattached_count, attachable_events=attachable_events,
                           admin_name=session.get('admin_name'))
+
+@app.route('/admin/incidents/<incident_id>/attach', methods=['POST'])
+@login_required
+def attach_incident(incident_id):
+    """Link an UNATTACHED incident to an event. Attach-once: refuses if the
+    incident already has an event (re-linking would let records drift)."""
+    event_id = request.form.get('event_id', '').strip()
+    if not event_id:
+        flash('Choose an event to attach this incident to.', 'error')
+        return redirect(url_for('admin_incidents'))
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT id, name FROM events WHERE id = ? AND status != 'cancelled'", (event_id,))
+    ev = c.fetchone()
+    if not ev:
+        conn.close()
+        flash('That event was not found (or is cancelled).', 'error')
+        return redirect(url_for('admin_incidents'))
+    c.execute('UPDATE incidents SET event_id = ? WHERE id = ? AND event_id IS NULL',
+              (event_id, incident_id))
+    changed = c.rowcount
+    conn.commit()
+    conn.close()
+    if changed:
+        flash(f"Incident attached to {ev['name']}.", 'success')
+    else:
+        flash('That incident is already attached to an event (or was not found).', 'error')
+    return redirect(url_for('admin_incidents'))
+
+@app.route('/admin/incidents/<incident_id>/delete', methods=['POST'])
+@login_required
+def delete_incident(incident_id):
+    """Hard-delete an UNATTACHED incident only (test/junk records). Attached
+    incidents are historical records — they leave only via event purge."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('DELETE FROM incidents WHERE id = ? AND event_id IS NULL', (incident_id,))
+    deleted = c.rowcount
+    conn.commit()
+    conn.close()
+    if deleted:
+        flash('Unattached incident permanently deleted.', 'success')
+    else:
+        flash('Only unattached incidents can be deleted. Attached incidents are part of the event record.', 'error')
+    return redirect(url_for('admin_incidents'))
 
 @app.route('/admin/tips', methods=['GET'])
 @login_required
@@ -3542,7 +3595,15 @@ def _classify_incident(desc: str):
 
 
 def handle_incident(phone: str, body: str):
-    """Handle 'INCIDENT [description]' SMS command."""
+    """Handle 'INCIDENT [description]' SMS command.
+
+    SAFETY — THIS PATH MUST NEVER FAIL CLOSED (tracker C-17). If the reporter
+    cannot be tied to exactly one event, the incident is filed UNATTACHED
+    (event_id NULL) and the manager is still alerted. Losing the event link is
+    a data-quality problem; losing the incident is a safety problem. Do not
+    reintroduce refusal branches here. Unattached incidents surface in the
+    admin Incidents view for later association.
+    """
     m = re.match(r'^INCIDENT\s+(.+)', body.strip(), re.IGNORECASE)
     if not m:
         return ("To report an incident, reply INCIDENT followed by a description.\n"
@@ -3563,16 +3624,18 @@ def handle_incident(phone: str, body: str):
     staff_id = staff['id']
     staff_name = staff['name']
     status, event = resolve_staff_event(c, staff_id)
-    if status == 'none':
-        conn.close()
-        return ("You're not assigned to an event around today, so I can't file this incident "
-                "against one. Please contact your coordinator."), None
-    if status == 'multiple':
-        conn.close()
-        return ("You're assigned to more than one event right now, so I can't tell which this "
-                "incident belongs to. Please contact your coordinator."), None
-    event_id = event['id']
-    event_name = event['name']
+    if status == 'ok':
+        event_id = event['id']
+        event_name = event['name']
+        link_note = None
+    elif status == 'multiple':
+        event_id = None
+        event_name = None
+        link_note = 'multiple possible events'
+    else:  # 'none' — file it anyway
+        event_id = None
+        event_name = None
+        link_note = 'staffer not assigned to an event'
 
     incident_id = str(uuid.uuid4())
     c.execute('''INSERT INTO incidents (id, staff_id, event_id, description, severity, reported_at)
@@ -3584,13 +3647,20 @@ def handle_incident(phone: str, body: str):
     manager_phone = get_manager_phone()
     if manager_phone:
         sev_emoji = {'high': '🔴', 'medium': '🟡', 'low': '🟢'}[severity]
+        event_line = event_name if event_name else f"(not linked — {link_note})"
         msg = (f"{sev_emoji} INCIDENT REPORT\n\nStaff: {staff_name}\n"
-               f"Event: {event_name}\nSeverity: {severity.upper()}\nDescription: {raw_desc}")
+               f"Event: {event_line}\nSeverity: {severity.upper()}\nDescription: {raw_desc}")
         send_sms_alert(manager_phone, msg)
 
     sev_label = {'high': '🔴 HIGH', 'medium': '🟡 MEDIUM', 'low': '🟢 LOW'}[severity]
+    notified = ("Your manager has been notified." if manager_phone
+                else "Your report has been filed.")
+    if event_name:
+        return (f"✅ Incident logged.\nSeverity: {sev_label}\n"
+                f"{notified} Thank you."), None
     return (f"✅ Incident logged.\nSeverity: {sev_label}\n"
-            "Your manager has been notified. Thank you."), None
+            f"{notified} It isn't linked to a specific event yet — "
+            "your manager will follow up. Thank you."), None
 
 # ─── Shift Swap Request ───────────────────────────────────────────────────────
 
