@@ -4217,7 +4217,6 @@ def sms_optin():
                    "that box checked if you'd like to subscribe."})
 
 
-@app.route('/sms/webhook', methods=['GET', 'POST'])
 def handle_availability_response(from_number, body, decision):
     """Resolve a CONFIRM / DECLINE reply to a staffing broadcast (C-19).
 
@@ -4272,6 +4271,7 @@ def handle_availability_response(from_number, body, decision):
         conn.close()
 
 
+@app.route('/sms/webhook', methods=['GET', 'POST'])
 def sms_webhook():
     """Twilio SMS webhook — routes to onboarding bot or FAQ auto-reply."""
     try:
