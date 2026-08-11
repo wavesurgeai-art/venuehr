@@ -188,7 +188,7 @@
                     <select name="staff_id" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
                         <option value="">Select staff...</option>
                         {% for s in all_staff %}
-                        <option value="{{ s.id }}">{{ s.name }} ({{ s.role }})</option>
+                        <option value="{{ s.id }}">{% if s.id in confirmed_ids %}✅ {% endif %}{{ s.name }} ({{ s.role }}){% if s.id in confirmed_ids %} — available{% endif %}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -267,6 +267,67 @@
     </div>
     {% endif %}
 </div>
+
+<!-- Availability Responses (C-19) -->
+{% if availability.confirmed or availability.declined or availability.pending %}
+<div class="mt-6 bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+    <div class="flex flex-col gap-1 md:flex-row md:items-center md:justify-between mb-4">
+        <h3 class="text-lg font-semibold text-gray-900">Availability Responses</h3>
+        <p class="text-sm text-gray-500">
+            {{ availability.confirmed|length }} available ·
+            {{ availability.declined|length }} unavailable ·
+            {{ availability.pending|length }} no reply yet
+        </p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="rounded-lg border border-green-200 bg-green-50 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-green-800 mb-2">Available</p>
+            {% if availability.confirmed %}
+            <ul class="space-y-1 text-sm text-green-900">
+                {% for s in availability.confirmed %}
+                <li>{{ s.name }} <span class="text-green-700">({{ s.role }})</span>{% if s.assigned %} <span class="text-xs font-semibold">— assigned</span>{% endif %}</li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-sm text-green-700">No confirmations yet.</p>
+            {% endif %}
+        </div>
+
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-700 mb-2">Unavailable</p>
+            {% if availability.declined %}
+            <ul class="space-y-1 text-sm text-gray-700">
+                {% for s in availability.declined %}
+                <li>{{ s.name }} <span class="text-gray-500">({{ s.role }})</span></li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-sm text-gray-500">Nobody has declined.</p>
+            {% endif %}
+        </div>
+
+        <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-amber-800 mb-2">No reply yet</p>
+            {% if availability.pending %}
+            <ul class="space-y-1 text-sm text-amber-900">
+                {% for s in availability.pending %}
+                <li>{{ s.name }} <span class="text-amber-700">({{ s.role }})</span></li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-sm text-amber-700">Everyone has responded.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <p class="text-xs text-gray-500 mt-4">
+        Confirming availability does not assign anyone. Assign from the panel above —
+        each person is texted and emailed their date, time and location when you do.
+        Staff who replied DECLINE are skipped by future broadcasts for this event.
+    </p>
+</div>
+{% endif %}
 
 <!-- Staffing Gaps -->
 <div class="mt-6 bg-amber-50 rounded-xl p-6 border border-amber-200">
