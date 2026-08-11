@@ -663,6 +663,120 @@ def _phone_digits(raw):
     return d
 
 
+def _event_label(event):
+    """Short human label for an event: weekday + name (e.g. 'Saturday Miller Wedding')."""
+    day = ''
+    try:
+        from datetime import date as _date
+        y, m, d = str(event['date'])[:10].split('-')
+        day = _date(int(y), int(m), int(d)).strftime('%A')
+    except Exception:
+        day = ''
+    name = (event['name'] or '').strip()
+    return f'{day} {name}'.strip() if day else name
+
+
+def _event_when_where(event):
+    """Date / time / place lines for an assignment notice. Only emits the
+    fields that are actually populated -- events.start_time, space and
+    location all default to '' and are frequently blank."""
+    lines = [f"Date: {event['date']}"]
+    start = (event['start_time'] or '').strip()
+    end = (event['end_time'] or '').strip()
+    if start and end:
+        lines.append(f'Time: {start} - {end}')
+    elif start:
+        lines.append(f'Time: {start}')
+    space = (event['space'] or '').strip()
+    location = (event['location'] or '').strip()
+    where = ' - '.join([p for p in (space, location) if p])
+    if where:
+        lines.append(f'Where: {where}')
+    return lines
+
+
+def get_pending_availability(c, phone):
+    """Open (unanswered) availability requests for a phone, soonest event first.
+
+    Matching is digit-tolerant on the last 10 digits (landmine: E.164 on write,
+    tolerant match on read). Returns a list of dicts with the request id and the
+    joined event row fields needed to name the event back to the staffer.
+    """
+    target = _phone_digits(phone)
+    if not target:
+        return []
+    c.execute("""SELECT ar.id AS req_id, ar.phone AS req_phone, ar.event_id AS event_id,
+                        e.name AS name, e.date AS date, e.start_time AS start_time,
+                        e.end_time AS end_time, e.space AS space, e.location AS location
+                 FROM availability_requests ar
+                 JOIN events e ON e.id = ar.event_id
+                 WHERE ar.responded = 0
+                   AND COALESCE(e.status, 'active') <> 'cancelled'
+                 ORDER BY e.date ASC""")
+    return [dict(r) for r in c.fetchall() if _phone_digits(r['req_phone']) == target]
+
+
+def _match_pending(pending, token):
+    """Narrow pending requests using the word after CONFIRM/DECLINE.
+
+    Accepts a weekday ('SATURDAY'/'SAT'), a date fragment ('2026-08-15',
+    '08-15', '15'), or any word from the event name. Returns the matches.
+    """
+    tok = (token or '').strip().upper()
+    if not tok:
+        return list(pending)
+    hits = []
+    for p in pending:
+        label = _event_label(p).upper()
+        name = (p['name'] or '').upper()
+        datestr = str(p['date'])[:10]
+        if (label.startswith(tok) or tok in label.split()
+                or tok in name.split() or tok in name
+                or tok in datestr or datestr.endswith(tok)):
+            hits.append(p)
+    return hits
+
+
+def notify_assignment(c, staff_row, event, role, kind='assigned'):
+    """Tell a staffer they are on (or off) an event, with when and where.
+
+    kind: 'assigned' | 'confirmed' | 'removed'. Email always (when an address is
+    on file); SMS only when the number carries an active opt-in -- consent is
+    not a mass-send-only rule. Returns (email_sent: bool, sms_queued: bool).
+    """
+    venue = get_venue_name()
+    label = _event_label(event)
+    if kind == 'removed':
+        subject = f'Schedule change -- {event["name"]}'
+        lines = [f'You have been taken off the crew for {label} at {venue}.', '',
+                 f"Date: {event['date']}", '',
+                 'No action needed. Contact your coordinator with questions.']
+    else:
+        verb = ('You are confirmed for' if kind == 'confirmed'
+                else 'You have been assigned to')
+        subject = f'You are on the crew -- {event["name"]}'
+        lines = [f'{verb} {label} at {venue}.', '']
+        lines += _event_when_where(event)
+        lines.append(f'Role: {role}' if role else '')
+        lines += ['', 'Reply FAQ for text commands.']
+    body = '\n'.join([ln for ln in lines if ln is not None])
+
+    email_sent = False
+    email = (staff_row['email'] or '').strip() if 'email' in staff_row.keys() else ''
+    if email:
+        email_sent = bool(send_email(email, subject, body))
+
+    sms_queued = False
+    phone = (staff_row['phone'] or '').strip() if 'phone' in staff_row.keys() else ''
+    if phone:
+        consented = {_phone_digits(p) for p in get_sms_consented_numbers(c)}
+        consented.discard('')
+        if _phone_digits(phone) in consented:
+            send_sms_alert(phone, f'{venue}: ' + body)   # fire-and-forget
+            sms_queued = True
+    return email_sent, sms_queued
+
+
 def find_staff_by_phone(c, phone, columns='id, name'):
     """Look up a staff row by phone, tolerant of stored formatting differences.
     1) exact match on the incoming (E.164) value;
@@ -1679,6 +1793,15 @@ def staffing_broadcast(event_id):
 
     # Active + unassigned, narrowed by the chosen filters. Archived staff must
     # never be contacted (Jul 7 archived-dropdown sweep missed this spot once).
+    # Anyone who already DECLINED this event is dropped from targeting -- a
+    # decline is an answer, and re-texting it reads as nagging. Re-broadcasting
+    # deliberately (a new send) still skips them; clear the response row to undo.
+    c.execute('''SELECT phone FROM availability_requests
+                 WHERE event_id = ? AND responded = 1
+                   AND UPPER(COALESCE(response, '')) = 'DECLINE' ''', (event_id,))
+    declined_digits = {_phone_digits(r['phone']) for r in c.fetchall()}
+    declined_digits.discard('')
+
     sql = ['''SELECT s.* FROM staff s
               WHERE s.id NOT IN (SELECT staff_id FROM event_staffing WHERE event_id=?)
                 AND COALESCE(s.archived, 0) = 0''']
@@ -1698,7 +1821,8 @@ def staffing_broadcast(event_id):
         params.append(emp_filter)
     sql.append('ORDER BY s.name')
     c.execute(' '.join(sql), tuple(params))
-    unassigned = c.fetchall()
+    unassigned = [s for s in c.fetchall()
+                  if _phone_digits(s['phone']) not in declined_digits]
 
     # Digit-tolerant consent set (landmine: E.164 on write, last-10 match on read)
     consented = {_phone_digits(p) for p in get_sms_consented_numbers(c)} if include_sms else set()
@@ -1715,6 +1839,32 @@ def staffing_broadcast(event_id):
            f"Date: {event['date']}\n"
            f"Guests: {event['guest_count']}\n\n"
            f"Reply CONFIRM if you're available, or DECLINE if not.")
+
+    # Record the outstanding request BEFORE sending. Without a pending row there
+    # is nothing for a CONFIRM/DECLINE reply to resolve against (C-19).
+    now_iso = datetime.now().isoformat()
+    for staff in unassigned:
+        ph = (staff['phone'] or '').strip()
+        if not ph:
+            continue
+        c2 = conn2 = None
+        try:
+            conn2 = get_db()
+            c2 = conn2.cursor()
+            c2.execute('''SELECT id FROM availability_requests
+                          WHERE event_id = ? AND phone = ? AND responded = 0''',
+                       (event_id, ph))
+            if not c2.fetchone():
+                c2.execute('''INSERT INTO availability_requests
+                              (id, event_id, phone, sent_at, responded, response)
+                              VALUES (?, ?, ?, ?, 0, NULL)''',
+                           (str(uuid.uuid4()), event_id, ph, now_iso))
+                conn2.commit()
+        except Exception as e:
+            app.logger.error(f'availability_request insert failed for {ph}: {e}')
+        finally:
+            if conn2:
+                conn2.close()
 
     sms_queued = email_ok = email_fail = 0
     unreachable = []
@@ -1851,6 +2001,32 @@ def event_edit(event_id):
                    AND p.license_type IS NOT NULL AND p.license_type <> ''
                  ORDER BY p.license_type''')
     broadcast_licenses = [r['license_type'] for r in c.fetchall()]
+
+    # Availability responses for this event (C-19). Keyed by last-10 digits so
+    # the panel can flag who said yes without a second round-trip per row.
+    c.execute('''SELECT phone, responded, response, sent_at
+                 FROM availability_requests WHERE event_id = ?''', (event_id,))
+    avail_rows = c.fetchall()
+    resp_by_digits = {}
+    for r in avail_rows:
+        d = _phone_digits(r['phone'])
+        if d:
+            resp_by_digits[d] = (r['response'] or '').upper() if r['responded'] else 'PENDING'
+    assigned_ids = {a['staff_id'] for a in assignments}
+    availability = {'confirmed': [], 'declined': [], 'pending': []}
+    for s in all_staff:
+        state = resp_by_digits.get(_phone_digits(s['phone']))
+        if not state:
+            continue
+        entry = {'id': s['id'], 'name': s['name'], 'role': s['role'],
+                 'assigned': s['id'] in assigned_ids}
+        if state == 'CONFIRM':
+            availability['confirmed'].append(entry)
+        elif state == 'DECLINE':
+            availability['declined'].append(entry)
+        else:
+            availability['pending'].append(entry)
+    confirmed_ids = {e['id'] for e in availability['confirmed']}
     conn.close()
 
     guest_count = event['guest_count']
@@ -1876,6 +2052,8 @@ def event_edit(event_id):
                            required=required, gaps=gaps,
                            broadcast_roles=broadcast_roles,
                            broadcast_licenses=broadcast_licenses,
+                           availability=availability,
+                           confirmed_ids=confirmed_ids,
                            admin_name=session.get('admin_name'))
 
 
@@ -1891,17 +2069,51 @@ def event_staffing_action(event_id):
         flash('Event not found.', 'error')
         return redirect(url_for('events_list'))
 
+    c.execute('SELECT * FROM events WHERE id=?', (event_id,))
+    event_row = c.fetchone()
+
+    def _notify(staff_id, role, kind):
+        """Send the staffer their schedule change (C-20). Never let a delivery
+        failure roll back a database change that already committed."""
+        try:
+            c.execute('SELECT id, name, phone, email FROM staff WHERE id=?', (staff_id,))
+            srow = c.fetchone()
+            if not srow or not event_row:
+                return
+            emailed, texted = notify_assignment(c, srow, event_row, role, kind)
+            if emailed or texted:
+                bits = []
+                if emailed:
+                    bits.append('emailed')
+                if texted:
+                    bits.append('texted')
+                flash(f"{srow['name']} was {' and '.join(bits)}.", 'success')
+        except Exception as e:
+            app.logger.error(f'assignment notification failed: {e}')
+
     action = request.form.get('action')
     if action == 'confirm_staff':
+        staffing_id = request.form.get('staffing_id')
+        c.execute('SELECT staff_id, role FROM event_staffing WHERE id=? AND event_id=?',
+                  (staffing_id, event_id))
+        target = c.fetchone()
         c.execute('UPDATE event_staffing SET confirmed=1 WHERE id=? AND event_id=?',
-                  (request.form.get('staffing_id'), event_id))
+                  (staffing_id, event_id))
         conn.commit()
         flash('Staff confirmed.', 'success')
+        if target:
+            _notify(target['staff_id'], target['role'], 'confirmed')
     elif action == 'remove_staff':
+        staffing_id = request.form.get('staffing_id')
+        c.execute('SELECT staff_id, role FROM event_staffing WHERE id=? AND event_id=?',
+                  (staffing_id, event_id))
+        target = c.fetchone()
         c.execute('DELETE FROM event_staffing WHERE id=? AND event_id=?',
-                  (request.form.get('staffing_id'), event_id))
+                  (staffing_id, event_id))
         conn.commit()
         flash('Staff removed.', 'success')
+        if target:
+            _notify(target['staff_id'], target['role'], 'removed')
     else:
         # assign_staff (default)
         staff_id = request.form.get('staff_id')
@@ -1916,6 +2128,7 @@ def event_staffing_action(event_id):
                           (str(uuid.uuid4()), event_id, staff_id, role))
                 conn.commit()
                 flash(f'{role} assigned.', 'success')
+                _notify(staff_id, role, 'assigned')
     conn.close()
     return redirect(url_for('event_edit', event_id=event_id) + '#staffing')
 
@@ -4005,6 +4218,60 @@ def sms_optin():
 
 
 @app.route('/sms/webhook', methods=['GET', 'POST'])
+def handle_availability_response(from_number, body, decision):
+    """Resolve a CONFIRM / DECLINE reply to a staffing broadcast (C-19).
+
+    RECORD-ONLY BY DESIGN. A confirm records availability; it does NOT assign.
+    The coordinator assigns from the Manage Event staffing panel, and the
+    staffer is notified at that point (C-20). Do not convert this into
+    auto-assignment without revisiting the headcount cap and the race between
+    two simultaneous confirms.
+
+    Contract: any outbound message that requests a keyword must ship with the
+    branch that handles it. Never leave a requested reply unparsed again.
+    """
+    parts = (body or '').strip().split()
+    token = parts[1] if len(parts) > 1 else ''
+
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        pending = get_pending_availability(c, from_number)
+        if not pending:
+            return ("We don't have an open staffing request for you right now. "
+                    "Reply FAQ for a list of commands."), None
+
+        matches = _match_pending(pending, token)
+
+        if not matches:
+            opts = ', '.join(_event_label(p) for p in pending[:3])
+            return (f"We couldn't match that to an open request. Reply "
+                    f"{decision} plus the day -- for example: {decision} "
+                    f"{_event_label(pending[0]).split()[0].upper()}. "
+                    f"Open requests: {opts}"), None
+
+        if len(matches) > 1:
+            opts = ' or '.join(
+                f"{decision} {_event_label(p).split()[0].upper()}" for p in matches[:3])
+            return (f"You have more than one open request. Reply {opts}."), None
+
+        req = matches[0]
+        c.execute("""UPDATE availability_requests
+                     SET responded = 1, response = ?
+                     WHERE id = ? AND responded = 0""", (decision, req['req_id']))
+        conn.commit()
+
+        label = _event_label(req)
+        if decision == 'CONFIRM':
+            return (f"Thanks -- you're marked AVAILABLE for {label} "
+                    f"({req['date']}). Your coordinator will confirm your "
+                    f"assignment; you'll get a text when you're on the crew."), None
+        return (f"Got it -- you're marked UNAVAILABLE for {label} "
+                f"({req['date']}). Thanks for letting us know."), None
+    finally:
+        conn.close()
+
+
 def sms_webhook():
     """Twilio SMS webhook — routes to onboarding bot or FAQ auto-reply."""
     try:
@@ -4079,6 +4346,10 @@ def sms_webhook():
             answer, next_step = handle_swap_request(from_number, body)
         elif upper_body.startswith('RATE '):
             answer, next_step = handle_rating(from_number, body)
+        elif upper_body == 'CONFIRM' or upper_body.startswith('CONFIRM '):
+            answer, next_step = handle_availability_response(from_number, body, 'CONFIRM')
+        elif upper_body == 'DECLINE' or upper_body.startswith('DECLINE '):
+            answer, next_step = handle_availability_response(from_number, body, 'DECLINE')
         elif upper_body.startswith('PAYROLL'):
             link = request.host_url + 'admin/payroll_export'
             answer = (f"Payroll Export\n\nDownload your payroll report:\n{link}\n"
