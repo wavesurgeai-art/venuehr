@@ -3,7 +3,7 @@
 {% block title %}Timesheets — VenueHR{% endblock %}
 
 {% block content %}
-<div class="flex items-center justify-between mb-6">
+<div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
     <h1 class="text-2xl font-bold text-gray-900">Timesheets</h1>
     <a href="{{ url_for('payroll_export') }}"
        class="inline-flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium px-4 py-2 rounded-lg">
@@ -13,6 +13,7 @@
 
 <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
     {% if entries %}
+    <div class="overflow-x-auto">
     <table class="w-full text-sm">
         <thead>
             <tr class="text-left text-gray-500 border-b">
@@ -37,6 +38,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
     {% else %}
     <p class="text-gray-500 text-center py-8">No timesheet entries yet. Staff can clock in via SMS.</p>
     {% endif %}
