@@ -63,4 +63,16 @@
         </button>
     </form>
 </div>
+
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 max-w-lg mt-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-1">Export Venue Data</h2>
+    <p class="text-sm text-gray-500 mb-4">
+        Download every record for this venue in one ZIP — staff, events, timesheets, tips,
+        incidents, swaps, ratings, and a signed PDF of every onboarding document on file.
+    </p>
+    <a href="{{ url_for('venue_export') }}"
+       class="block w-full text-center bg-rose-600 text-white py-2 rounded-lg font-medium hover:bg-rose-700">
+        Export All Data (ZIP)
+    </a>
+</div>
 {% endblock %}
