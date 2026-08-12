@@ -70,25 +70,45 @@
     {% block extra_head %}{% endblock %}
 </head>
 <body class="bg-gray-50 min-h-screen">
+    {# C-13: below md the full link list collapses behind a hamburger toggle
+       instead of flex-wrapping inline (the Aug 6 fix). nav_links renders the
+       same 10 links twice — once for the desktop row, once for the mobile
+       panel — so the two never drift out of sync with each other. #}
+    {% macro nav_links(link_class) %}
+    <a href="{{ url_for('dashboard') }}" class="{{ link_class }} hover:text-white {% if request.endpoint == 'dashboard' %}text-white font-medium{% endif %}">Dashboard</a>
+    <a href="{{ url_for('staff_list') }}" class="{{ link_class }} hover:text-white {% if request.endpoint and 'staff' in request.endpoint %}text-white font-medium{% endif %}">Staff</a>
+    <a href="{{ url_for('events_list') }}" class="{{ link_class }} hover:text-white {% if request.endpoint == 'events_list' %}text-white font-medium{% endif %}">Events</a>
+    <a href="{{ url_for('admin_faqs') }}" class="{{ link_class }} hover:text-white {% if request.endpoint and 'faq' in request.endpoint %}text-white font-medium{% endif %}">FAQs</a>
+    <a href="{{ url_for('timesheets') }}" class="{{ link_class }} hover:text-white {% if request.endpoint and 'timesheet' in request.endpoint %}text-white font-medium{% endif %}">Timesheets</a>
+    <a href="{{ url_for('admin_swaps') }}" class="{{ link_class }} hover:text-white {% if request.endpoint and 'swaps' in request.endpoint %}text-white font-medium{% endif %}">Swaps</a>
+    <a href="{{ url_for('admin_incidents') }}" class="{{ link_class }} hover:text-white {% if request.endpoint and 'incidents' in request.endpoint %}text-white font-medium{% endif %}">Incidents</a>
+    <a href="{{ url_for('admin_ratings') }}" class="{{ link_class }} hover:text-white {% if request.endpoint and 'ratings' in request.endpoint %}text-white font-medium{% endif %}">Ratings</a>
+    <a href="{{ url_for('admin_tips') }}" class="{{ link_class }} hover:text-white {% if request.endpoint and 'tips' in request.endpoint %}text-white font-medium{% endif %}">Tips</a>
+    <a href="{{ url_for('venue_settings') }}" class="{{ link_class }} hover:text-white {% if request.endpoint == 'venue_settings' %}text-white font-medium{% endif %}">Settings</a>
+    {% endmacro %}
     {% if admin_name %}
     <nav class="bg-brand-deep shadow-sm">
-        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-y-3">
-            <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center gap-6">
                 <a href="{{ url_for('dashboard') }}" class="font-display text-2xl tracking-wide text-brand-gold hover:text-brand-goldl">VenueHR</a>
-                <div class="flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-300">
-                    <a href="{{ url_for('dashboard') }}" class="hover:text-white {% if request.endpoint == 'dashboard' %}text-white font-medium{% endif %}">Dashboard</a>
-                    <a href="{{ url_for('staff_list') }}" class="hover:text-white {% if request.endpoint and 'staff' in request.endpoint %}text-white font-medium{% endif %}">Staff</a>
-                    <a href="{{ url_for('events_list') }}" class="hover:text-white {% if request.endpoint == 'events_list' %}text-white font-medium{% endif %}">Events</a>
-                    <a href="{{ url_for('admin_faqs') }}" class="hover:text-white {% if request.endpoint and 'faq' in request.endpoint %}text-white font-medium{% endif %}">FAQs</a>
-                    <a href="{{ url_for('timesheets') }}" class="hover:text-white {% if request.endpoint and 'timesheet' in request.endpoint %}text-white font-medium{% endif %}">Timesheets</a>
-                    <a href="{{ url_for('admin_swaps') }}" class="hover:text-white {% if request.endpoint and 'swaps' in request.endpoint %}text-white font-medium{% endif %}">Swaps</a>
-                    <a href="{{ url_for('admin_incidents') }}" class="hover:text-white {% if request.endpoint and 'incidents' in request.endpoint %}text-white font-medium{% endif %}">Incidents</a>
-                    <a href="{{ url_for('admin_ratings') }}" class="hover:text-white {% if request.endpoint and 'ratings' in request.endpoint %}text-white font-medium{% endif %}">Ratings</a>
-                    <a href="{{ url_for('admin_tips') }}" class="hover:text-white {% if request.endpoint and 'tips' in request.endpoint %}text-white font-medium{% endif %}">Tips</a>
-                    <a href="{{ url_for('venue_settings') }}" class="hover:text-white {% if request.endpoint == 'venue_settings' %}text-white font-medium{% endif %}">Settings</a>
+                <div class="hidden md:flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-300">
+                    {{ nav_links('') }}
                 </div>
             </div>
-            <div class="flex items-center gap-4">
+            <div class="hidden md:flex items-center gap-4">
+                <span class="text-sm text-slate-400">Welcome, {{ admin_name }}</span>
+                <a href="{{ url_for('logout') }}" class="text-sm text-brand-gold hover:text-brand-goldl">Logout</a>
+            </div>
+            <button type="button" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')"
+                    class="md:hidden text-slate-300 hover:text-white p-2 -mr-2" aria-label="Toggle menu" aria-controls="mobile-menu">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                </svg>
+            </button>
+        </div>
+        <div id="mobile-menu" class="hidden md:hidden border-t border-slate-700 px-4 py-3 space-y-1 text-sm text-slate-300">
+            {{ nav_links('block px-2 py-2 rounded hover:bg-slate-800') }}
+            <div class="border-t border-slate-700 mt-2 pt-3 flex items-center justify-between">
                 <span class="text-sm text-slate-400">Welcome, {{ admin_name }}</span>
                 <a href="{{ url_for('logout') }}" class="text-sm text-brand-gold hover:text-brand-goldl">Logout</a>
             </div>
