@@ -185,21 +185,28 @@
             <div class="space-y-3">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Staff Member</label>
-                    <select name="staff_id" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <select name="staff_id" id="assign-staff-select" required
+                            onchange="const r=this.options[this.selectedIndex].dataset.role; const sel=document.getElementById('assign-role-select'); if (r && [...sel.options].some(o => o.value === r)) sel.value = r;"
+                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
                         <option value="">Select staff...</option>
                         {% for s in all_staff %}
-                        <option value="{{ s.id }}">{% if s.id in confirmed_ids %}✅ {% endif %}{{ s.name }} ({{ s.role }}){% if s.id in confirmed_ids %} — available{% endif %}</option>
+                        <option value="{{ s.id }}" data-role="{{ s.role }}">{% if s.id in confirmed_ids %}✅ {% endif %}{{ s.name }} ({{ s.role }}){% if s.id in confirmed_ids %} — available{% endif %}</option>
                         {% endfor %}
                     </select>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                    <select name="role" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <!-- C-21: was hardcoded to Server/Bartender/Event Lead/Security-Parking only,
+                         so a Coordinator (or anyone else outside those 4) couldn't be assigned as
+                         themselves. Now derived from the same live-role list the broadcast filters
+                         already use (broadcast_roles), so every role in actual use is selectable.
+                         Picking a staff member above auto-selects their own role here if it's in
+                         the list; still freely overridable for a deliberate cross-role assignment. -->
+                    <select name="role" id="assign-role-select" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
                         <option value="">Select role...</option>
-                        <option value="Server">Server</option>
-                        <option value="Bartender">Bartender</option>
-                        <option value="Event Lead">Event Lead</option>
-                        <option value="Security/Parking">Security/Parking</option>
+                        {% for r in broadcast_roles %}
+                        <option value="{{ r }}">{{ r }}</option>
+                        {% endfor %}
                     </select>
                 </div>
                 <button type="submit" class="w-full bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">
