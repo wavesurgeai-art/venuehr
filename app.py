@@ -2646,6 +2646,27 @@ def seed_data():
     flash(f'Demo data seeded — {count} staff/contractors added.', 'success')
     return redirect(url_for('staff_list'))
 
+@app.route('/admin/fix-c16', methods=['GET'])
+@login_required
+def fix_c16_employment_type():
+    """One-time data backfill for C-16. The seed INSERTs in seed_data() and demo_mode()
+    omitted employment_type until this build, so any staff row created by an earlier
+    seed run defaulted to 'w2' even for outside vendors. This corrects rows already
+    sitting in whichever database this route is hit against — it reads DATABASE_URL
+    like every other route, so running it on venuehr-demo.onrender.com touches the
+    demo database and running it on venuehr.wavesurgeai.com touches prod. Scoped to
+    the six vendor-only role strings; idempotent, safe to run more than once."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""UPDATE staff SET employment_type = 'contractor'
+                 WHERE role IN ('Caterer', 'Photographer', 'DJ', 'Florist', 'Videographer', 'Officiant')
+                   AND COALESCE(employment_type, 'w2') != 'contractor'""")
+    updated = c.rowcount
+    conn.commit()
+    conn.close()
+    flash(f'C-16 backfill: {updated} staff row(s) corrected to employment_type = contractor.', 'success')
+    return redirect(url_for('staff_list'))
+
 @app.route('/demo', methods=['GET'])
 @login_required
 def demo_mode():
