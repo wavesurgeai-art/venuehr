@@ -2600,42 +2600,42 @@ def seed_data():
     venue_id = 'default'
 
     staff_records = [
-        ('owner-001', venue_id, 'Margaret E. Hollister',    'margaret@wavesurgeai.com',   '+1 317-555-0101', 'Owner',         '2025-03-01', uuid.uuid4().hex, 'signed', now),
-        ('coord-001', venue_id, 'Tyler J. Brennan',          'tyler@wavesurgeai.com',      '+1 317-555-0102', 'Coordinator',   '2025-03-15', uuid.uuid4().hex, 'signed', now),
-        ('admin-001', venue_id, 'Samantha R. Whitfield',     'samantha@wavesurgeai.com',   '+1 317-555-0103', 'Administrator', '2025-04-01', uuid.uuid4().hex, 'signed', now),
-        ('bart-001', venue_id, 'Darius L. Morrison',         'dmorrison@gmail.com',        '+1 317-555-0201', 'Bartender',     '2025-05-10', uuid.uuid4().hex, 'pending', now),
-        ('bart-002', venue_id, "Caitlin M. O'Brien",        'cobrien@gmail.com',          '+1 317-555-0202', 'Bartender',     '2025-05-12', uuid.uuid4().hex, 'pending', now),
-        ('bart-003', venue_id, 'Ethan R. Caldwell',          'ecaldwell@gmail.com',        '+1 317-555-0203', 'Bartender',     '2025-05-14', uuid.uuid4().hex, 'pending', now),
-        ('bart-004', venue_id, 'Nia K. Franklin',            'nia.franklin@gmail.com',     '+1 317-555-0204', 'Bartender',     '2025-05-16', uuid.uuid4().hex, 'pending', now),
-        ('serv-001', venue_id, 'Brandon T. Holloway',        'bholloway@gmail.com',        '+1 317-555-0301', 'Server',        '2025-06-01', uuid.uuid4().hex, 'pending', now),
-        ('serv-002', venue_id, 'Kayla D. Seymour',           'kseymour@gmail.com',         '+1 317-555-0302', 'Server',        '2025-06-03', uuid.uuid4().hex, 'pending', now),
-        ('serv-003', venue_id, 'Marcus J. Navarro',           'mnavarro@gmail.com',         '+1 317-555-0303', 'Server',        '2025-06-05', uuid.uuid4().hex, 'pending', now),
-        ('serv-004', venue_id, 'Aaliyah B. Reyes',           'areyes@gmail.com',           '+1 317-555-0304', 'Server',        '2025-06-07', uuid.uuid4().hex, 'pending', now),
-        ('serv-005', venue_id, 'Jordan L. Cummins',          'jcummins@gmail.com',         '+1 317-555-0305', 'Server',        '2025-06-09', uuid.uuid4().hex, 'pending', now),
-        ('serv-006', venue_id, 'Amara S. Patel',             'apatel@gmail.com',           '+1 317-555-0306', 'Server',        '2025-06-11', uuid.uuid4().hex, 'pending', now),
-        ('serv-007', venue_id, 'Tyler Q. Washington',        'twashington@gmail.com',      '+1 317-555-0307', 'Server',        '2025-06-13', uuid.uuid4().hex, 'pending', now),
-        ('serv-008', venue_id, 'Destiny R. Garcia',          'dgarcia@gmail.com',          '+1 317-555-0308', 'Server',        '2025-06-15', uuid.uuid4().hex, 'pending', now),
-        ('serv-009', venue_id, 'Andre M. Lawson',            'alawson@gmail.com',          '+1 317-555-0309', 'Server',        '2025-06-17', uuid.uuid4().hex, 'pending', now),
-        ('serv-010', venue_id, 'Imani C. Brooks',            'imbrooks@gmail.com',         '+1 317-555-0310', 'Server',        '2025-06-19', uuid.uuid4().hex, 'pending', now),
-        ('serv-011', venue_id, 'Kevin J. Fletcher',          'kfletcher@gmail.com',        '+1 317-555-0311', 'Server',        '2025-06-21', uuid.uuid4().hex, 'pending', now),
-        ('serv-012', venue_id, 'Jasmine L. Ortega',          'jortega@gmail.com',          '+1 317-555-0312', 'Server',        '2025-06-23', uuid.uuid4().hex, 'pending', now),
-        ('serv-013', venue_id, 'Noah P. Santiago',           'nsantiago@gmail.com',        '+1 317-555-0313', 'Server',        '2025-06-25', uuid.uuid4().hex, 'pending', now),
-        ('serv-014', venue_id, 'Maya T. Underwood',          'munderwood@gmail.com',       '+1 317-555-0314', 'Server',        '2025-07-01', uuid.uuid4().hex, 'pending', now),
-        ('serv-015', venue_id, 'Luis A. Vega',               'lvega@gmail.com',            '+1 317-555-0315', 'Server',        '2025-07-03', uuid.uuid4().hex, 'pending', now),
-        ('serv-016', venue_id, 'Rachel K. Newman',           'rnewman@gmail.com',          '+1 317-555-0316', 'Server',        '2025-07-05', uuid.uuid4().hex, 'pending', now),
-        ('cont-001', venue_id, 'Gourmet & Grace Catering — Rachel Stern',    'rachel@gourmetgrace.com',   '+1 317-555-0401', 'Caterer',      '2025-01-15', uuid.uuid4().hex, 'signed', now),
-        ('cont-002', venue_id, 'Focus & Light Photography — David Chen',    'david@focuslightphoto.com', '+1 317-555-0402', 'Photographer', '2025-01-20', uuid.uuid4().hex, 'signed', now),
-        ('cont-003', venue_id, 'BeatDrop DJ Services — Marcus Thompson',   'marcus@beatdropservices.com','+1 317-555-0403', 'DJ',           '2025-02-01', uuid.uuid4().hex, 'signed', now),
-        ('cont-004', venue_id, 'Bloom & Wild Florals — Aisha Williams',    'aisha@bloomwildflorals.com', '+1 317-555-0404', 'Florist',      '2025-02-05', uuid.uuid4().hex, 'signed', now),
-        ('cont-005', venue_id, 'Cinema Stories Videography — Jose Rivera', 'jose@cinemastories.com',    '+1 317-555-0405', 'Videographer', '2025-02-10', uuid.uuid4().hex, 'signed', now),
-        ('cont-006', venue_id, 'Ceremony & Soul Officiant — Rev. Patricia Cole', 'patricia@ceremonyandsoul.com', '+1 317-555-0406', 'Officiant', '2025-02-15', uuid.uuid4().hex, 'signed', now),
+        ('owner-001', venue_id, 'Margaret E. Hollister',    'margaret@wavesurgeai.com',   '+1 317-555-0101', 'Owner',         'w2', '2025-03-01', uuid.uuid4().hex, 'signed', now),
+        ('coord-001', venue_id, 'Tyler J. Brennan',          'tyler@wavesurgeai.com',      '+1 317-555-0102', 'Coordinator',   'w2', '2025-03-15', uuid.uuid4().hex, 'signed', now),
+        ('admin-001', venue_id, 'Samantha R. Whitfield',     'samantha@wavesurgeai.com',   '+1 317-555-0103', 'Administrator', 'w2', '2025-04-01', uuid.uuid4().hex, 'signed', now),
+        ('bart-001', venue_id, 'Darius L. Morrison',         'dmorrison@gmail.com',        '+1 317-555-0201', 'Bartender',     'w2', '2025-05-10', uuid.uuid4().hex, 'pending', now),
+        ('bart-002', venue_id, "Caitlin M. O'Brien",        'cobrien@gmail.com',          '+1 317-555-0202', 'Bartender',     'w2', '2025-05-12', uuid.uuid4().hex, 'pending', now),
+        ('bart-003', venue_id, 'Ethan R. Caldwell',          'ecaldwell@gmail.com',        '+1 317-555-0203', 'Bartender',     'w2', '2025-05-14', uuid.uuid4().hex, 'pending', now),
+        ('bart-004', venue_id, 'Nia K. Franklin',            'nia.franklin@gmail.com',     '+1 317-555-0204', 'Bartender',     'w2', '2025-05-16', uuid.uuid4().hex, 'pending', now),
+        ('serv-001', venue_id, 'Brandon T. Holloway',        'bholloway@gmail.com',        '+1 317-555-0301', 'Server',        'w2', '2025-06-01', uuid.uuid4().hex, 'pending', now),
+        ('serv-002', venue_id, 'Kayla D. Seymour',           'kseymour@gmail.com',         '+1 317-555-0302', 'Server',        'w2', '2025-06-03', uuid.uuid4().hex, 'pending', now),
+        ('serv-003', venue_id, 'Marcus J. Navarro',           'mnavarro@gmail.com',         '+1 317-555-0303', 'Server',        'w2', '2025-06-05', uuid.uuid4().hex, 'pending', now),
+        ('serv-004', venue_id, 'Aaliyah B. Reyes',           'areyes@gmail.com',           '+1 317-555-0304', 'Server',        'w2', '2025-06-07', uuid.uuid4().hex, 'pending', now),
+        ('serv-005', venue_id, 'Jordan L. Cummins',          'jcummins@gmail.com',         '+1 317-555-0305', 'Server',        'w2', '2025-06-09', uuid.uuid4().hex, 'pending', now),
+        ('serv-006', venue_id, 'Amara S. Patel',             'apatel@gmail.com',           '+1 317-555-0306', 'Server',        'w2', '2025-06-11', uuid.uuid4().hex, 'pending', now),
+        ('serv-007', venue_id, 'Tyler Q. Washington',        'twashington@gmail.com',      '+1 317-555-0307', 'Server',        'w2', '2025-06-13', uuid.uuid4().hex, 'pending', now),
+        ('serv-008', venue_id, 'Destiny R. Garcia',          'dgarcia@gmail.com',          '+1 317-555-0308', 'Server',        'w2', '2025-06-15', uuid.uuid4().hex, 'pending', now),
+        ('serv-009', venue_id, 'Andre M. Lawson',            'alawson@gmail.com',          '+1 317-555-0309', 'Server',        'w2', '2025-06-17', uuid.uuid4().hex, 'pending', now),
+        ('serv-010', venue_id, 'Imani C. Brooks',            'imbrooks@gmail.com',         '+1 317-555-0310', 'Server',        'w2', '2025-06-19', uuid.uuid4().hex, 'pending', now),
+        ('serv-011', venue_id, 'Kevin J. Fletcher',          'kfletcher@gmail.com',        '+1 317-555-0311', 'Server',        'w2', '2025-06-21', uuid.uuid4().hex, 'pending', now),
+        ('serv-012', venue_id, 'Jasmine L. Ortega',          'jortega@gmail.com',          '+1 317-555-0312', 'Server',        'w2', '2025-06-23', uuid.uuid4().hex, 'pending', now),
+        ('serv-013', venue_id, 'Noah P. Santiago',           'nsantiago@gmail.com',        '+1 317-555-0313', 'Server',        'w2', '2025-06-25', uuid.uuid4().hex, 'pending', now),
+        ('serv-014', venue_id, 'Maya T. Underwood',          'munderwood@gmail.com',       '+1 317-555-0314', 'Server',        'w2', '2025-07-01', uuid.uuid4().hex, 'pending', now),
+        ('serv-015', venue_id, 'Luis A. Vega',               'lvega@gmail.com',            '+1 317-555-0315', 'Server',        'w2', '2025-07-03', uuid.uuid4().hex, 'pending', now),
+        ('serv-016', venue_id, 'Rachel K. Newman',           'rnewman@gmail.com',          '+1 317-555-0316', 'Server',        'w2', '2025-07-05', uuid.uuid4().hex, 'pending', now),
+        ('cont-001', venue_id, 'Gourmet & Grace Catering — Rachel Stern',    'rachel@gourmetgrace.com',   '+1 317-555-0401', 'Caterer',      'contractor', '2025-01-15', uuid.uuid4().hex, 'signed', now),
+        ('cont-002', venue_id, 'Focus & Light Photography — David Chen',    'david@focuslightphoto.com', '+1 317-555-0402', 'Photographer', 'contractor', '2025-01-20', uuid.uuid4().hex, 'signed', now),
+        ('cont-003', venue_id, 'BeatDrop DJ Services — Marcus Thompson',   'marcus@beatdropservices.com','+1 317-555-0403', 'DJ',           'contractor', '2025-02-01', uuid.uuid4().hex, 'signed', now),
+        ('cont-004', venue_id, 'Bloom & Wild Florals — Aisha Williams',    'aisha@bloomwildflorals.com', '+1 317-555-0404', 'Florist',      'contractor', '2025-02-05', uuid.uuid4().hex, 'signed', now),
+        ('cont-005', venue_id, 'Cinema Stories Videography — Jose Rivera', 'jose@cinemastories.com',    '+1 317-555-0405', 'Videographer', 'contractor', '2025-02-10', uuid.uuid4().hex, 'signed', now),
+        ('cont-006', venue_id, 'Ceremony & Soul Officiant — Rev. Patricia Cole', 'patricia@ceremonyandsoul.com', '+1 317-555-0406', 'Officiant', 'contractor', '2025-02-15', uuid.uuid4().hex, 'signed', now),
     ]
 
     count = 0
     for row in staff_records:
         try:
-            c.execute("""INSERT OR IGNORE INTO staff (id, venue_id, name, email, phone, role, hire_date, onboarding_token, agreement_status, created_at)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
+            c.execute("""INSERT OR IGNORE INTO staff (id, venue_id, name, email, phone, role, employment_type, hire_date, onboarding_token, agreement_status, created_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
             count += 1
         except Exception:
             pass
@@ -2687,66 +2687,66 @@ def demo_mode():
     # ── Seed demo staff ────────────────────────────────────────────────────────
     staff_records = [
         # Venue staff (admin)
-        ('owner-001', venue_id, 'Margaret E. Hollister',    'margaret@wavesurgeai.com',   '+1 317-555-0101', 'Owner',         '2025-03-01', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('coord-001', venue_id, 'Tyler J. Brennan',          'tyler@wavesurgeai.com',      '+1 317-555-0102', 'Coordinator',   '2025-03-15', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('admin-001', venue_id, 'Samantha R. Whitfield',     'samantha@wavesurgeai.com',   '+1 317-555-0103', 'Administrator', '2025-04-01', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('owner-001', venue_id, 'Margaret E. Hollister',    'margaret@wavesurgeai.com',   '+1 317-555-0101', 'Owner',         'w2', '2025-03-01', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('coord-001', venue_id, 'Tyler J. Brennan',          'tyler@wavesurgeai.com',      '+1 317-555-0102', 'Coordinator',   'w2', '2025-03-15', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('admin-001', venue_id, 'Samantha R. Whitfield',     'samantha@wavesurgeai.com',   '+1 317-555-0103', 'Administrator', 'w2', '2025-04-01', uuid.uuid4().hex, 'signed', now.isoformat()),
         # Bartenders (primary)
-        ('bart-001', venue_id, 'Darius L. Morrison',         'dmorrison@gmail.com',        '+1 317-555-0201', 'Bartender',     '2025-05-10', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('bart-002', venue_id, "Caitlin M. O'Brien",        'cobrien@gmail.com',          '+1 317-555-0202', 'Bartender',     '2025-05-12', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('bart-003', venue_id, 'Ethan R. Caldwell',          'ecaldwell@gmail.com',        '+1 317-555-0203', 'Bartender',     '2025-05-14', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('bart-004', venue_id, 'Nia K. Franklin',             'nia.franklin@gmail.com',     '+1 317-555-0204', 'Bartender',     '2025-05-16', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('bart-005', venue_id, 'Victor R. Okonkwo',          'vokonkwo@gmail.com',         '+1 317-555-0205', 'Bartender',     '2025-06-01', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('bart-006', venue_id, 'Travis W. Barlow',           'tbarlow@gmail.com',         '+1 317-555-0206', 'Bartender',     '2025-06-03', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('bart-007', venue_id, 'Chloe A. Vance',             'cvance@gmail.com',           '+1 317-555-0207', 'Bartender',     '2025-06-05', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('bart-008', venue_id, 'Rashad K. Ellis',            'rellis@gmail.com',           '+1 317-555-0208', 'Bartender',     '2025-06-07', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('bart-001', venue_id, 'Darius L. Morrison',         'dmorrison@gmail.com',        '+1 317-555-0201', 'Bartender',     'w2', '2025-05-10', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('bart-002', venue_id, "Caitlin M. O'Brien",        'cobrien@gmail.com',          '+1 317-555-0202', 'Bartender',     'w2', '2025-05-12', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('bart-003', venue_id, 'Ethan R. Caldwell',          'ecaldwell@gmail.com',        '+1 317-555-0203', 'Bartender',     'w2', '2025-05-14', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('bart-004', venue_id, 'Nia K. Franklin',             'nia.franklin@gmail.com',     '+1 317-555-0204', 'Bartender',     'w2', '2025-05-16', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('bart-005', venue_id, 'Victor R. Okonkwo',          'vokonkwo@gmail.com',         '+1 317-555-0205', 'Bartender',     'w2', '2025-06-01', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('bart-006', venue_id, 'Travis W. Barlow',           'tbarlow@gmail.com',         '+1 317-555-0206', 'Bartender',     'w2', '2025-06-03', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('bart-007', venue_id, 'Chloe A. Vance',             'cvance@gmail.com',           '+1 317-555-0207', 'Bartender',     'w2', '2025-06-05', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('bart-008', venue_id, 'Rashad K. Ellis',            'rellis@gmail.com',           '+1 317-555-0208', 'Bartender',     'w2', '2025-06-07', uuid.uuid4().hex, 'pending', now.isoformat()),
         # Servers (primary)
-        ('serv-001', venue_id, 'Brandon T. Holloway',        'bholloway@gmail.com',        '+1 317-555-0301', 'Server',        '2025-06-01', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('serv-002', venue_id, 'Kayla D. Seymour',           'kseymour@gmail.com',         '+1 317-555-0302', 'Server',        '2025-06-03', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('serv-003', venue_id, 'Marcus J. Navarro',           'mnavarro@gmail.com',         '+1 317-555-0303', 'Server',        '2025-06-05', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('serv-004', venue_id, 'Aaliyah B. Reyes',           'areyes@gmail.com',           '+1 317-555-0304', 'Server',        '2025-06-07', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('serv-005', venue_id, 'Jordan L. Cummins',          'jcummins@gmail.com',         '+1 317-555-0305', 'Server',        '2025-06-09', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('serv-006', venue_id, 'Amara S. Patel',             'apatel@gmail.com',           '+1 317-555-0306', 'Server',        '2025-06-11', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('serv-007', venue_id, 'Tyler Q. Washington',        'twashington@gmail.com',      '+1 317-555-0307', 'Server',        '2025-06-13', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('serv-008', venue_id, 'Destiny R. Garcia',          'dgarcia@gmail.com',          '+1 317-555-0308', 'Server',        '2025-06-15', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('serv-009', venue_id, 'Andre M. Lawson',            'alawson@gmail.com',          '+1 317-555-0309', 'Server',        '2025-06-17', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('serv-010', venue_id, 'Imani C. Brooks',            'imbrooks@gmail.com',         '+1 317-555-0310', 'Server',        '2025-06-19', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('serv-011', venue_id, 'Kevin J. Fletcher',          'kfletcher@gmail.com',        '+1 317-555-0311', 'Server',        '2025-06-21', uuid.uuid4().hex, 'pending', now.isoformat()),
-        ('serv-012', venue_id, 'Latrice M. Harmon',         'lharmon@gmail.com',           '+1 317-555-0312', 'Server',        '2025-06-23', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-001', venue_id, 'Brandon T. Holloway',        'bholloway@gmail.com',        '+1 317-555-0301', 'Server',        'w2', '2025-06-01', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-002', venue_id, 'Kayla D. Seymour',           'kseymour@gmail.com',         '+1 317-555-0302', 'Server',        'w2', '2025-06-03', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-003', venue_id, 'Marcus J. Navarro',           'mnavarro@gmail.com',         '+1 317-555-0303', 'Server',        'w2', '2025-06-05', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-004', venue_id, 'Aaliyah B. Reyes',           'areyes@gmail.com',           '+1 317-555-0304', 'Server',        'w2', '2025-06-07', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-005', venue_id, 'Jordan L. Cummins',          'jcummins@gmail.com',         '+1 317-555-0305', 'Server',        'w2', '2025-06-09', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-006', venue_id, 'Amara S. Patel',             'apatel@gmail.com',           '+1 317-555-0306', 'Server',        'w2', '2025-06-11', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-007', venue_id, 'Tyler Q. Washington',        'twashington@gmail.com',      '+1 317-555-0307', 'Server',        'w2', '2025-06-13', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-008', venue_id, 'Destiny R. Garcia',          'dgarcia@gmail.com',          '+1 317-555-0308', 'Server',        'w2', '2025-06-15', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-009', venue_id, 'Andre M. Lawson',            'alawson@gmail.com',          '+1 317-555-0309', 'Server',        'w2', '2025-06-17', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-010', venue_id, 'Imani C. Brooks',            'imbrooks@gmail.com',         '+1 317-555-0310', 'Server',        'w2', '2025-06-19', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-011', venue_id, 'Kevin J. Fletcher',          'kfletcher@gmail.com',        '+1 317-555-0311', 'Server',        'w2', '2025-06-21', uuid.uuid4().hex, 'pending', now.isoformat()),
+        ('serv-012', venue_id, 'Latrice M. Harmon',         'lharmon@gmail.com',           '+1 317-555-0312', 'Server',        'w2', '2025-06-23', uuid.uuid4().hex, 'pending', now.isoformat()),
         # Event Lead
-        ('lead-001', venue_id, 'Patricia D. Nguyen',        'pnguyen@gmail.com',          '+1 317-555-0501', 'Event Lead',    '2025-02-01', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('lead-001', venue_id, 'Patricia D. Nguyen',        'pnguyen@gmail.com',          '+1 317-555-0501', 'Event Lead',    'w2', '2025-02-01', uuid.uuid4().hex, 'signed', now.isoformat()),
         # Security/Parking — primary
-        ('sec-001', venue_id, 'Darnell K. Odom',            'domod@gmail.com',            '+1 317-555-0601', 'Security',      '2025-02-10', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('sec-002', venue_id, 'Sandra L. Moody',            'smoody@gmail.com',           '+1 317-555-0602', 'Security',      '2025-02-10', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('sec-001', venue_id, 'Darnell K. Odom',            'domod@gmail.com',            '+1 317-555-0601', 'Security',      'w2', '2025-02-10', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('sec-002', venue_id, 'Sandra L. Moody',            'smoody@gmail.com',           '+1 317-555-0602', 'Security',      'w2', '2025-02-10', uuid.uuid4().hex, 'signed', now.isoformat()),
         # Multi-role staff: Security + Bartender
-        ('secbart-001', venue_id, 'Marcus T. Webb',         'mwebb@gmail.com',            '+1 317-555-0603', 'Security/Bartender', '2025-02-15', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('secbart-001', venue_id, 'Marcus T. Webb',         'mwebb@gmail.com',            '+1 317-555-0603', 'Security/Bartender', 'w2', '2025-02-15', uuid.uuid4().hex, 'signed', now.isoformat()),
         # Multi-role staff: Security + Server
-        ('secserv-001', venue_id, 'Tamika D. Frye',         'tfrye@gmail.com',            '+1 317-555-0604', 'Security/Server',   '2025-02-15', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('secserv-002', venue_id, 'Damon R. Stoudt',        'dstoudt@gmail.com',          '+1 317-555-0605', 'Security/Server',   '2025-02-15', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('secserv-001', venue_id, 'Tamika D. Frye',         'tfrye@gmail.com',            '+1 317-555-0604', 'Security/Server',   'w2', '2025-02-15', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('secserv-002', venue_id, 'Damon R. Stoudt',        'dstoudt@gmail.com',          '+1 317-555-0605', 'Security/Server',   'w2', '2025-02-15', uuid.uuid4().hex, 'signed', now.isoformat()),
         # Primary contractors
-        ('cont-001', venue_id, 'Gourmet & Grace Catering — Rachel Stern',    'rachel@gourmetgrace.com',   '+1 317-555-0401', 'Caterer',      '2025-01-15', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('cont-002', venue_id, 'Focus & Light Photography — David Chen',    'david@focuslightphoto.com', '+1 317-555-0402', 'Photographer', '2025-01-20', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('cont-003', venue_id, 'BeatDrop DJ Services — Marcus Thompson',   'marcus@beatdropservices.com','+1 317-555-0403', 'DJ',           '2025-02-01', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-001', venue_id, 'Gourmet & Grace Catering — Rachel Stern',    'rachel@gourmetgrace.com',   '+1 317-555-0401', 'Caterer',      'contractor', '2025-01-15', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-002', venue_id, 'Focus & Light Photography — David Chen',    'david@focuslightphoto.com', '+1 317-555-0402', 'Photographer', 'contractor', '2025-01-20', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-003', venue_id, 'BeatDrop DJ Services — Marcus Thompson',   'marcus@beatdropservices.com','+1 317-555-0403', 'DJ',           'contractor', '2025-02-01', uuid.uuid4().hex, 'signed', now.isoformat()),
         # Alternate contractors
-        ('cont-004', venue_id, 'Silver Service Catering — Owen Bell',        'owen@silverservicecatering.com', '+1 317-555-0404', 'Caterer',      '2025-02-01', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('cont-005', venue_id, 'Golden Hour Photos — Simone Laurent',       'simone@goldenhourphotos.com',    '+1 317-555-0405', 'Photographer', '2025-02-05', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('cont-006', venue_id, 'Precision Beats DJ — Jerome Clarke',     'jerome@precisionbeats.com',      '+1 317-555-0406', 'DJ',           '2025-02-10', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('cont-007', venue_id, 'Bloom & Wild Florals — Aisha Williams',    'aisha@bloomwildflorals.com',   '+1 317-555-0407', 'Florist',      '2025-02-05', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('cont-008', venue_id, 'Cinema Stories Videography — Jose Rivera', 'jose@cinemastories.com',       '+1 317-555-0408', 'Videographer', '2025-02-10', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('cont-009', venue_id, 'Ceremony & Soul Officiant — Rev. Patricia Cole','patricia@ceremonyandsoul.com','+1 317-555-0409', 'Officiant',    '2025-02-15', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-004', venue_id, 'Silver Service Catering — Owen Bell',        'owen@silverservicecatering.com', '+1 317-555-0404', 'Caterer',      'contractor', '2025-02-01', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-005', venue_id, 'Golden Hour Photos — Simone Laurent',       'simone@goldenhourphotos.com',    '+1 317-555-0405', 'Photographer', 'contractor', '2025-02-05', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-006', venue_id, 'Precision Beats DJ — Jerome Clarke',     'jerome@precisionbeats.com',      '+1 317-555-0406', 'DJ',           'contractor', '2025-02-10', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-007', venue_id, 'Bloom & Wild Florals — Aisha Williams',    'aisha@bloomwildflorals.com',   '+1 317-555-0407', 'Florist',      'contractor', '2025-02-05', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-008', venue_id, 'Cinema Stories Videography — Jose Rivera', 'jose@cinemastories.com',       '+1 317-555-0408', 'Videographer', 'contractor', '2025-02-10', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-009', venue_id, 'Ceremony & Soul Officiant — Rev. Patricia Cole','patricia@ceremonyandsoul.com','+1 317-555-0409', 'Officiant',    'contractor', '2025-02-15', uuid.uuid4().hex, 'signed', now.isoformat()),
         # Additional caterers
-        ('cont-010', venue_id, 'Harvest & Hearth Catering — Bianca Russo',     'bianca@harvesthearth.com',       '+1 317-555-0410', 'Caterer',      '2025-02-18', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('cont-011', venue_id, 'Saffron Table Catering — Devin Okafor',       'devin@saffrontable.com',         '+1 317-555-0411', 'Caterer',      '2025-02-20', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-010', venue_id, 'Harvest & Hearth Catering — Bianca Russo',     'bianca@harvesthearth.com',       '+1 317-555-0410', 'Caterer',      'contractor', '2025-02-18', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-011', venue_id, 'Saffron Table Catering — Devin Okafor',       'devin@saffrontable.com',         '+1 317-555-0411', 'Caterer',      'contractor', '2025-02-20', uuid.uuid4().hex, 'signed', now.isoformat()),
         # Additional videographers
-        ('cont-012', venue_id, 'Evergreen Wedding Films — Holly Tran',        'holly@evergreenfilms.com',       '+1 317-555-0412', 'Videographer', '2025-02-22', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('cont-013', venue_id, 'Heartframe Films — Andre Castillo',           'andre@heartframefilms.com',      '+1 317-555-0413', 'Videographer', '2025-02-25', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-012', venue_id, 'Evergreen Wedding Films — Holly Tran',        'holly@evergreenfilms.com',       '+1 317-555-0412', 'Videographer', 'contractor', '2025-02-22', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-013', venue_id, 'Heartframe Films — Andre Castillo',           'andre@heartframefilms.com',      '+1 317-555-0413', 'Videographer', 'contractor', '2025-02-25', uuid.uuid4().hex, 'signed', now.isoformat()),
         # Additional photographers
-        ('cont-014', venue_id, 'Lumen & Lace Photography — Priya Desai',      'priya@lumenlace.com',            '+1 317-555-0414', 'Photographer', '2025-02-28', uuid.uuid4().hex, 'signed', now.isoformat()),
-        ('cont-015', venue_id, 'Stillwater Studios — Cole Bennett',           'cole@stillwaterstudios.com',     '+1 317-555-0415', 'Photographer', '2025-03-03', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-014', venue_id, 'Lumen & Lace Photography — Priya Desai',      'priya@lumenlace.com',            '+1 317-555-0414', 'Photographer', 'contractor', '2025-02-28', uuid.uuid4().hex, 'signed', now.isoformat()),
+        ('cont-015', venue_id, 'Stillwater Studios — Cole Bennett',           'cole@stillwaterstudios.com',     '+1 317-555-0415', 'Photographer', 'contractor', '2025-03-03', uuid.uuid4().hex, 'signed', now.isoformat()),
     ]
     for row in staff_records:
         try:
-            c.execute("""INSERT OR IGNORE INTO staff (id, venue_id, name, email, phone, role, hire_date, onboarding_token, agreement_status, created_at)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
+            c.execute("""INSERT OR IGNORE INTO staff (id, venue_id, name, email, phone, role, employment_type, hire_date, onboarding_token, agreement_status, created_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
         except Exception:
             pass
 
