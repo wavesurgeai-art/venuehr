@@ -3,7 +3,7 @@
 {% block title %}{{ step.title if step else 'Document' }} — VenueHR{% endblock %}
 
 {% block content %}
-<div class="mb-8 flex justify-between items-center">
+<div class="mb-8 flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
     <div>
         <a href="{{ url_for('staff_detail', staff_id=staff.id) }}" class="text-sm text-gray-500 hover:text-gray-700">← Back to {{ staff.name }}</a>
         <h1 class="text-2xl font-bold text-gray-900 mt-2">{{ step.title if step else doc.doc_type }}</h1>
@@ -27,6 +27,7 @@
     {% if field_rows %}
     <h3 class="text-sm font-medium text-gray-500 mb-3">Information Provided</h3>
     <div class="overflow-hidden rounded-lg border border-gray-200 mb-6">
+        <div class="overflow-x-auto">
         <table class="w-full text-sm">
             <tbody>
                 {% for row in field_rows %}
@@ -37,6 +38,7 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
     {% endif %}
 
