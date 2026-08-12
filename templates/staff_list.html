@@ -41,15 +41,19 @@
         </div>
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Role *</label>
+            {# C-26: option values are the canonical capitalized role strings
+               (matching seed data and every other role-writing path), not
+               lowercase -- a lowercase-vs-capitalized mismatch here silently
+               broke Required Headcount gap matching in event_edit(). #}
             <select name="role" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500 focus:border-rose-500">
-                <option value="bartender">Bartender</option>
-                <option value="server">Server</option>
-                <option value="coordinator">Coordinator</option>
-                <option value="caterer">Caterer</option>
-                <option value="dj">DJ</option>
-                <option value="security">Security</option>
-                <option value="photographer">Photographer</option>
-                <option value="other">Other</option>
+                <option value="Bartender">Bartender</option>
+                <option value="Server">Server</option>
+                <option value="Coordinator">Coordinator</option>
+                <option value="Caterer">Caterer</option>
+                <option value="DJ">DJ</option>
+                <option value="Security">Security</option>
+                <option value="Photographer">Photographer</option>
+                <option value="Other">Other</option>
             </select>
         </div>
         <div>
