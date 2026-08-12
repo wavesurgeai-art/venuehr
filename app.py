@@ -1991,6 +1991,18 @@ def events_list():
     conn = get_db()
     c = conn.cursor()
     if request.method == 'POST':
+        # C-27: guest_count drives the entire Required Headcount calculation
+        # (event_edit() below), so a blank/zero value must be rejected rather
+        # than silently saved as 0 -- that produced a "fully staffed" panel
+        # for an event nobody had actually sized yet.
+        try:
+            guest_count = int(request.form.get('guest_count') or 0)
+        except ValueError:
+            guest_count = 0
+        if guest_count < 1:
+            flash('Guest count is required and must be at least 1 -- Required Headcount cannot be calculated without it.', 'error')
+            conn.close()
+            return redirect(url_for('events_list', new=1))
         tip_model = request.form.get('tip_model', 'equal_pool')
         if tip_model not in TIP_MODEL_VALUES:
             tip_model = 'equal_pool'
@@ -2001,7 +2013,7 @@ def events_list():
                       space, location, notes, tip_model, status, created_at)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)''',
                   (event_id, request.form.get('date'), request.form.get('name'),
-                   int(request.form.get('guest_count') or 0),
+                   guest_count,
                    request.form.get('start_time', ''), request.form.get('end_time', ''),
                    request.form.get('setup_date', ''), request.form.get('setup_time', ''),
                    request.form.get('teardown_date', ''), request.form.get('teardown_time', ''),
@@ -2036,6 +2048,17 @@ def event_edit(event_id):
         return redirect(url_for('events_list'))
 
     if request.method == 'POST':
+        # C-27: same guest_count guard as events_list() -- Required Headcount
+        # is derived entirely from this value, so a blank/zero edit must be
+        # rejected, not silently saved as 0.
+        try:
+            guest_count = int(request.form.get('guest_count') or 0)
+        except ValueError:
+            guest_count = 0
+        if guest_count < 1:
+            flash('Guest count is required and must be at least 1 -- Required Headcount cannot be calculated without it.', 'error')
+            conn.close()
+            return redirect(url_for('event_edit', event_id=event_id))
         tip_model = request.form.get('tip_model', 'equal_pool')
         if tip_model not in TIP_MODEL_VALUES:
             tip_model = 'equal_pool'
@@ -2047,7 +2070,7 @@ def event_edit(event_id):
                        space = ?, location = ?, notes = ?, tip_model = ?
                      WHERE id = ?''',
                   (request.form.get('name'), request.form.get('date'),
-                   int(request.form.get('guest_count') or 0),
+                   guest_count,
                    request.form.get('start_time', ''), request.form.get('end_time', ''),
                    request.form.get('setup_date', ''), request.form.get('setup_time', ''),
                    request.form.get('teardown_date', ''), request.form.get('teardown_time', ''),
@@ -2876,6 +2899,44 @@ def fix_c16_employment_type():
     conn.commit()
     conn.close()
     flash(f'C-16 backfill: {updated} staff row(s) corrected to employment_type = contractor.', 'success')
+    return redirect(url_for('staff_list'))
+
+# C-26: canonical capitalized role -> lowercase value(s) it may have been
+# stored as by the Add/Edit Staff forms before this build normalized them.
+C26_ROLE_MAP = {
+    'Bartender': 'bartender',
+    'Server': 'server',
+    'Coordinator': 'coordinator',
+    'Caterer': 'caterer',
+    'DJ': 'dj',
+    'Security': 'security',
+    'Photographer': 'photographer',
+    'Other': 'other',
+}
+
+@app.route('/admin/fix-c26', methods=['GET'])
+@login_required
+def fix_c26_role_case():
+    """One-time data backfill for C-26. The Add Staff (staff_list.html) and Edit
+    Staff (staff_detail.html) role <select> options stored lowercase values
+    ('bartender', 'coordinator', ...) while seed data and every other role-writing
+    path used capitalized strings ('Bartender', 'Coordinator', ...). The mismatch
+    was mostly invisible -- staff_list.html's role column has a CSS `capitalize`
+    class that visually fixes the display on that one page -- but it broke
+    event_edit()'s Required Headcount gap matching, which compares assigned roles
+    against the required dict's capitalized keys case-sensitively. This corrects
+    rows already sitting in whichever database this route is hit against, same
+    DATABASE_URL-scoping pattern as /admin/fix-c16. Idempotent, safe to run more
+    than once."""
+    conn = get_db()
+    c = conn.cursor()
+    total = 0
+    for canonical, lowercase in C26_ROLE_MAP.items():
+        c.execute("UPDATE staff SET role = ? WHERE role = ?", (canonical, lowercase))
+        total += c.rowcount
+    conn.commit()
+    conn.close()
+    flash(f'C-26 backfill: {total} staff row(s) corrected from lowercase to capitalized role.', 'success')
     return redirect(url_for('staff_list'))
 
 @app.route('/demo', methods=['GET'])
