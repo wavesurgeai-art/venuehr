@@ -29,6 +29,7 @@
 
 <div class="bg-white rounded-xl border border-gray-200">
     {% if swaps %}
+    <div class="overflow-x-auto">
     <table class="w-full">
         <thead class="bg-gray-50">
             <tr>
@@ -77,6 +78,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
     {% else %}
     <div class="text-center py-16 text-gray-400">
         <div class="text-4xl mb-3">🔄</div>
