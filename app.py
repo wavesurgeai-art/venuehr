@@ -1252,6 +1252,87 @@ def _phone_digits(p):
     return d[-10:]
 
 
+def _render_signed_doc_pdf(staff_name, step, doc, data):
+    """Render one signed onboarding document (agreement/handbook/W-4/I-9/etc.) as a
+    single PDF: title, who signed it and when, their submitted field answers, the
+    acknowledgment text, and the captured signature image if the step required one.
+    signature_image is stored as a canvas.toDataURL() data URL
+    ('data:image/png;base64,...') — decode after the first comma. Used only by
+    venue_export(); never mutates the DB, safe to call read-only and repeatedly."""
+    import io as _pdf_io
+    import base64 as _b64
+    import textwrap as _tw
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import inch
+    from reportlab.pdfgen import canvas as _pdfcanvas
+    from reportlab.lib.utils import ImageReader
+
+    buf = _pdf_io.BytesIO()
+    pdf = _pdfcanvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+    margin = 0.75 * inch
+    y = [height - margin]
+
+    def line(text, size=10, bold=False, gap=14):
+        if y[0] < margin + 40:
+            pdf.showPage()
+            y[0] = height - margin
+        pdf.setFont('Helvetica-Bold' if bold else 'Helvetica', size)
+        pdf.drawString(margin, y[0], text)
+        y[0] -= gap
+
+    def wrapped(text, size=9, gap=12, max_chars=95):
+        for ln in (text or '').splitlines() or ['']:
+            for chunk in (_tw.wrap(ln, max_chars) or ['']):
+                if y[0] < margin + 40:
+                    pdf.showPage()
+                    y[0] = height - margin
+                pdf.setFont('Helvetica', size)
+                pdf.drawString(margin, y[0], chunk)
+                y[0] -= gap
+
+    line(step['title'], size=14, bold=True, gap=20)
+    line(f"Staff member: {staff_name}", size=10, gap=16)
+    line(f"Signed: {doc['signed_at']}   IP: {doc['ip_address'] or 'n/a'}", size=9, gap=18)
+
+    if data:
+        line('Responses', size=11, bold=True, gap=16)
+        for f in step.get('fields', []):
+            val = data.get(f['name'], '')
+            if f['type'] == 'checkbox':
+                val = 'Yes' if val == 'yes' else 'No'
+            wrapped(f"{f['label']}: {val or '—'}", gap=13)
+        y[0] -= 6
+
+    line('Acknowledgment', size=11, bold=True, gap=16)
+    wrapped(step.get('ack', ''), gap=13)
+    y[0] -= 10
+
+    sig = doc['signature_image']
+    if sig and ',' in sig:
+        try:
+            _header, b64data = sig.split(',', 1)
+            img_bytes = _b64.b64decode(b64data)
+            sig_img = ImageReader(_pdf_io.BytesIO(img_bytes))
+            iw, ih = sig_img.getSize()
+            disp_w = 2.5 * inch
+            disp_h = disp_w * ih / iw if iw else 1 * inch
+            if y[0] - disp_h < margin:
+                pdf.showPage()
+                y[0] = height - margin
+            pdf.drawImage(sig_img, margin, y[0] - disp_h, width=disp_w, height=disp_h, mask='auto')
+            y[0] -= disp_h + 14
+        except Exception:
+            line('[signature on file — could not render]', size=9, gap=14)
+    else:
+        line('[no signature required for this step]', size=9, gap=14)
+
+    pdf.showPage()
+    pdf.save()
+    buf.seek(0)
+    return buf.getvalue()
+
+
 @app.route('/admin/staff/message')
 @login_required
 def message_staff():
@@ -2439,6 +2520,136 @@ def payroll_export():
     return output.getvalue(), 200, {
         'Content-Type': 'text/csv',
         'Content-Disposition': 'attachment; filename=payroll_export.csv'
+    }
+
+@app.route('/admin/venue/export')
+@login_required
+def venue_export():
+    """C-8: full-venue export. One ZIP containing a CSV per operational table
+    (staff, events, event_staffing, timesheets, tips, tip_distributions,
+    incidents, shift_swaps, performance_ratings, staff_profiles) plus one PDF per
+    signed onboarding document per staff member. This is what section 2.2 of the
+    data continuity clauses promises and the demo pitch already claims exists --
+    until this route, neither was true. Whole-venue, unpaginated, on demand:
+    single-venue data at this scale (hundreds of staff/events at most) fits in one
+    request comfortably. Read-only -- never writes to the DB."""
+    import io as _io2
+    import csv as _csv
+    import zipfile as _zipfile
+
+    conn = get_db()
+    c = conn.cursor()
+
+    zip_buf = _io2.BytesIO()
+    zf = _zipfile.ZipFile(zip_buf, 'w', _zipfile.ZIP_DEFLATED)
+
+    def add_csv(filename, header, query, row_fn):
+        c.execute(query)
+        out = _io2.StringIO()
+        w = _csv.writer(out)
+        w.writerow(header)
+        for r in c.fetchall():
+            w.writerow(row_fn(r))
+        zf.writestr(f'csv/{filename}', out.getvalue())
+
+    add_csv('staff.csv',
+            ['ID', 'Name', 'Email', 'Phone', 'Role', 'Employment Type', 'Hire Date', 'Agreement Status', 'Created At'],
+            "SELECT id, name, email, phone, role, employment_type, hire_date, agreement_status, created_at "
+            "FROM staff ORDER BY name",
+            lambda r: [r['id'], r['name'], r['email'], r['phone'] or '', r['role'],
+                       r['employment_type'] or 'w2', r['hire_date'] or '', r['agreement_status'] or '', r['created_at']])
+
+    add_csv('events.csv',
+            ['ID', 'Date', 'Name', 'Guest Count', 'Start', 'End', 'Setup Date', 'Setup Time',
+             'Teardown Date', 'Teardown Time', 'Space', 'Location', 'Status', 'Notes', 'Created At'],
+            "SELECT * FROM events ORDER BY date",
+            lambda r: [r['id'], r['date'], r['name'], r['guest_count'], r['start_time'] or '', r['end_time'] or '',
+                       r['setup_date'] or '', r['setup_time'] or '', r['teardown_date'] or '', r['teardown_time'] or '',
+                       r['space'] or '', r['location'] or '', r['status'], (r['notes'] or '').replace('\n', ' '), r['created_at']])
+
+    add_csv('event_staffing.csv',
+            ['ID', 'Event ID', 'Staff ID', 'Staff Name', 'Role', 'Confirmed', 'Pay Type', 'Rate'],
+            "SELECT es.*, s.name AS staff_name FROM event_staffing es "
+            "JOIN staff s ON es.staff_id = s.id ORDER BY es.event_id",
+            lambda r: [r['id'], r['event_id'], r['staff_id'], r['staff_name'], r['role'],
+                       'Yes' if r['confirmed'] else 'No', r['pay_type'] or '', r['rate'] or 0])
+
+    add_csv('timesheets.csv',
+            ['ID', 'Staff ID', 'Staff Name', 'Event ID', 'Clock In', 'Clock Out', 'Break Compliant', 'Total Hours', 'Notes'],
+            "SELECT t.*, s.name AS staff_name FROM timesheet_entries t "
+            "JOIN staff s ON t.staff_id = s.id ORDER BY t.clock_in",
+            lambda r: [r['id'], r['staff_id'], r['staff_name'], r['event_id'] or '', r['clock_in'] or '',
+                       r['clock_out'] or '', 'Yes' if r['break_compliant'] else 'No', r['total_hours'] or 0, r['notes'] or ''])
+
+    add_csv('tips.csv',
+            ['ID', 'Staff ID', 'Staff Name', 'Event ID', 'Amount', 'Type', 'Recorded At'],
+            "SELECT tp.*, s.name AS staff_name FROM tip_entries tp "
+            "JOIN staff s ON tp.staff_id = s.id ORDER BY tp.recorded_at",
+            lambda r: [r['id'], r['staff_id'], r['staff_name'], r['event_id'] or '', r['amount'], r['tip_type'], r['recorded_at']])
+
+    add_csv('tip_distributions.csv',
+            ['ID', 'Event ID', 'Staff ID', 'Staff Name', 'Tip Model', 'Hours Used', 'Hours Imputed',
+             'Pool Total', 'Share Amount', 'Calculated At'],
+            "SELECT td.*, s.name AS staff_name FROM tip_distributions td "
+            "JOIN staff s ON td.staff_id = s.id ORDER BY td.calculated_at",
+            lambda r: [r['id'], r['event_id'], r['staff_id'], r['staff_name'], r['tip_model'], r['hours_used'],
+                       'Yes' if r['hours_imputed'] else 'No', r['pool_total'], r['share_amount'], r['calculated_at']])
+
+    add_csv('incidents.csv',
+            ['ID', 'Staff ID', 'Staff Name', 'Event ID', 'Description', 'Severity', 'Resolved', 'Reported At'],
+            "SELECT i.*, s.name AS staff_name FROM incidents i "
+            "JOIN staff s ON i.staff_id = s.id ORDER BY i.reported_at",
+            lambda r: [r['id'], r['staff_id'], r['staff_name'], r['event_id'] or '',
+                       (r['description'] or '').replace('\n', ' '), r['severity'], 'Yes' if r['resolved'] else 'No', r['reported_at']])
+
+    add_csv('shift_swaps.csv',
+            ['ID', 'Staff ID', 'Staff Name', 'Event ID', 'Reason', 'Status', 'Created At'],
+            "SELECT sw.*, s.name AS staff_name FROM shift_swap_requests sw "
+            "JOIN staff s ON sw.staff_id = s.id ORDER BY sw.created_at",
+            lambda r: [r['id'], r['staff_id'], r['staff_name'], r['event_id'] or '',
+                       (r['reason'] or '').replace('\n', ' '), r['status'], r['created_at']])
+
+    add_csv('performance_ratings.csv',
+            ['ID', 'Staff ID', 'Staff Name', 'Event ID', 'Rating', 'Comment', 'Recorded At'],
+            "SELECT pr.*, s.name AS staff_name FROM performance_ratings pr "
+            "JOIN staff s ON pr.staff_id = s.id ORDER BY pr.recorded_at",
+            lambda r: [r['id'], r['staff_id'], r['staff_name'], r['event_id'] or '', r['rating'],
+                       (r['comment'] or '').replace('\n', ' '), r['recorded_at']])
+
+    add_csv('staff_profiles.csv',
+            ['Staff ID', 'Staff Name', 'Emergency Contact', 'Emergency Phone', 'Emergency Relationship',
+             'License Type', 'License Number', 'License State', 'License Expires', 'Updated At'],
+            "SELECT p.*, s.name AS staff_name FROM staff_profiles p "
+            "JOIN staff s ON p.staff_id = s.id ORDER BY s.name",
+            lambda r: [r['staff_id'], r['staff_name'], r['emergency_contact_name'] or '', r['emergency_contact_phone'] or '',
+                       r['emergency_contact_relationship'] or '', r['license_type'] or '', r['license_number'] or '',
+                       r['license_state'] or '', r['license_expires'] or '', r['updated_at']])
+
+    # --- one PDF per signed onboarding document per staff member ---
+    c.execute('SELECT id, name FROM staff ORDER BY name')
+    for st in c.fetchall():
+        c.execute('SELECT * FROM onboarding_documents WHERE staff_id = ?', (st['id'],))
+        for doc in c.fetchall():
+            step = next((s for s in ONBOARDING_STEPS if s['key'] == doc['doc_type']), None)
+            if not step:
+                continue
+            try:
+                data = json.loads(doc['data_json']) if doc['data_json'] else {}
+            except Exception:
+                data = {}
+            pdf_bytes = _render_signed_doc_pdf(st['name'], step, doc, data)
+            safe_name = re.sub(r'[^A-Za-z0-9_-]+', '_', st['name']).strip('_') or 'staff'
+            zf.writestr(f'signed_documents/{safe_name}_{st["id"][:8]}/{doc["doc_type"]}.pdf', pdf_bytes)
+
+    conn.close()
+    zf.close()
+    zip_buf.seek(0)
+    venue = get_venue_name()
+    fname = re.sub(r'[^A-Za-z0-9_-]+', '_', venue).strip('_') or 'venue'
+    fname = f'{fname}_full_export_{datetime.utcnow().strftime("%Y%m%d")}.zip'
+    return zip_buf.getvalue(), 200, {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': f'attachment; filename={fname}'
     }
 
 @app.route('/admin/swaps')
