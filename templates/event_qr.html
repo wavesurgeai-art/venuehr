@@ -15,7 +15,7 @@
 
 {% block content %}
 <div class="max-w-xl mx-auto">
-    <div class="no-print mb-6 flex justify-between items-center">
+    <div class="no-print mb-6 flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
         <a href="{{ url_for('events_list') }}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Events</a>
         <button onclick="window.print()" class="bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-700">🖨 Print</button>
     </div>
