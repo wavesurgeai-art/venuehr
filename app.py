@@ -655,12 +655,12 @@ def normalize_phone(raw):
     return str(raw).strip()
 
 
-def _phone_digits(raw):
-    """Last 10 digits of a phone, for format-agnostic matching."""
-    d = re.sub(r'\D', '', str(raw or ''))
-    if len(d) == 11 and d.startswith('1'):
-        d = d[1:]
-    return d
+# C-24: _phone_digits() used to be defined here AND again at its current
+# location further down -- the second definition silently shadowed this one
+# (same name, later in the module wins). They agreed on ordinary 10/11-digit
+# US numbers so nothing broke, but any future edit to one body without the
+# other would have caused silent, format-dependent phone-matching failures.
+# One definition now; see below (search _phone_digits) for the surviving body.
 
 
 def _event_label(event):
