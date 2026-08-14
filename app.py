@@ -2237,6 +2237,53 @@ def event_staffing_action(event_id):
     return redirect(url_for('event_edit', event_id=event_id) + '#staffing')
 
 
+@app.route('/admin/events/<event_id>/availability/reset', methods=['POST'])
+@login_required
+def event_availability_reset(event_id):
+    """C-22: clear one staffer's availability response for this event so they go
+    back to broadcast targeting. A DECLINE is permanent for that event otherwise
+    -- staffing_broadcast() drops anyone with a recorded DECLINE from every future
+    send for it, and until now the only fix was a manual UPDATE/DELETE in the
+    Neon SQL console. availability_requests has no staff_id column (it's keyed
+    by phone, since a reply can arrive before/without a matching staff record),
+    so the match is done the same way event_edit() builds the Availability
+    Responses panel: last-10-digit phone comparison in Python, never a raw
+    string match against the DB (format mismatches between the E.164 write path
+    and however a phone is stored elsewhere are a known landmine here)."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id FROM events WHERE id=?', (event_id,))
+    if not c.fetchone():
+        conn.close()
+        flash('Event not found.', 'error')
+        return redirect(url_for('events_list'))
+
+    staff_id = request.form.get('staff_id')
+    c.execute('SELECT id, name, phone FROM staff WHERE id=?', (staff_id,))
+    staff = c.fetchone()
+    if not staff or not staff['phone']:
+        conn.close()
+        flash('Could not find that staff member\'s phone number on file.', 'error')
+        return redirect(url_for('event_edit', event_id=event_id) + '#availability')
+
+    target_digits = _phone_digits(staff['phone'])
+    c.execute('SELECT id, phone FROM availability_requests WHERE event_id = ?', (event_id,))
+    matching_ids = [r['id'] for r in c.fetchall() if _phone_digits(r['phone']) == target_digits]
+
+    if not matching_ids:
+        conn.close()
+        flash(f"{staff['name']} has no recorded response for this event.", 'error')
+        return redirect(url_for('event_edit', event_id=event_id) + '#availability')
+
+    placeholders = ','.join('?' for _ in matching_ids)
+    c.execute(f'UPDATE availability_requests SET responded = 0, response = NULL WHERE id IN ({placeholders})',
+              tuple(matching_ids))
+    conn.commit()
+    conn.close()
+    flash(f"{staff['name']}'s response was cleared -- they'll be included in the next broadcast for this event.", 'success')
+    return redirect(url_for('event_edit', event_id=event_id) + '#availability')
+
+
 @app.route('/admin/events/<event_id>/message', methods=['POST'])
 @login_required
 def event_crew_message(event_id):
