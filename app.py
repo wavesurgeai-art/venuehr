@@ -2003,6 +2003,13 @@ def events_list():
             flash('Guest count is required and must be at least 1 -- Required Headcount cannot be calculated without it.', 'error')
             conn.close()
             return redirect(url_for('events_list', new=1))
+        # C-28: an event could otherwise be saved with no start time, weakening
+        # the assignment notification (C-20) that tells staff when to show up.
+        start_time = (request.form.get('start_time') or '').strip()
+        if not start_time:
+            flash('Start time is required.', 'error')
+            conn.close()
+            return redirect(url_for('events_list', new=1))
         tip_model = request.form.get('tip_model', 'equal_pool')
         if tip_model not in TIP_MODEL_VALUES:
             tip_model = 'equal_pool'
@@ -2014,7 +2021,7 @@ def events_list():
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)''',
                   (event_id, request.form.get('date'), request.form.get('name'),
                    guest_count,
-                   request.form.get('start_time', ''), request.form.get('end_time', ''),
+                   start_time, request.form.get('end_time', ''),
                    request.form.get('setup_date', ''), request.form.get('setup_time', ''),
                    request.form.get('teardown_date', ''), request.form.get('teardown_time', ''),
                    request.form.get('space', '').strip(), request.form.get('location', '').strip(),
@@ -2059,6 +2066,12 @@ def event_edit(event_id):
             flash('Guest count is required and must be at least 1 -- Required Headcount cannot be calculated without it.', 'error')
             conn.close()
             return redirect(url_for('event_edit', event_id=event_id))
+        # C-28: same start_time guard as events_list().
+        start_time = (request.form.get('start_time') or '').strip()
+        if not start_time:
+            flash('Start time is required.', 'error')
+            conn.close()
+            return redirect(url_for('event_edit', event_id=event_id))
         tip_model = request.form.get('tip_model', 'equal_pool')
         if tip_model not in TIP_MODEL_VALUES:
             tip_model = 'equal_pool'
@@ -2071,7 +2084,7 @@ def event_edit(event_id):
                      WHERE id = ?''',
                   (request.form.get('name'), request.form.get('date'),
                    guest_count,
-                   request.form.get('start_time', ''), request.form.get('end_time', ''),
+                   start_time, request.form.get('end_time', ''),
                    request.form.get('setup_date', ''), request.form.get('setup_time', ''),
                    request.form.get('teardown_date', ''), request.form.get('teardown_time', ''),
                    request.form.get('space', '').strip(), request.form.get('location', '').strip(),
