@@ -279,7 +279,7 @@
 
 <!-- Availability Responses (C-19) -->
 {% if availability.confirmed or availability.declined or availability.pending %}
-<div class="mt-6 bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+<div id="availability" class="mt-6 bg-white rounded-xl shadow-sm p-6 border border-gray-200">
     <div class="flex flex-col gap-1 md:flex-row md:items-center md:justify-between mb-4">
         <h3 class="text-lg font-semibold text-gray-900">Availability Responses</h3>
         <p class="text-sm text-gray-500">
@@ -308,7 +308,16 @@
             {% if availability.declined %}
             <ul class="space-y-1 text-sm text-gray-700">
                 {% for s in availability.declined %}
-                <li>{{ s.name }} <span class="text-gray-500">({{ s.role }})</span></li>
+                <li class="flex items-center justify-between gap-2">
+                    <span>{{ s.name }} <span class="text-gray-500">({{ s.role }})</span></span>
+                    {# C-22: a DECLINE is permanent for this event otherwise -- this
+                       clears the response so the next broadcast reaches them again. #}
+                    <form method="POST" action="{{ url_for('event_availability_reset', event_id=event.id) }}"
+                          onsubmit="return confirm('Clear {{ s.name }}\'s DECLINE? They will be included in the next broadcast for this event.');">
+                        <input type="hidden" name="staff_id" value="{{ s.id }}">
+                        <button type="submit" class="text-xs text-rose-600 hover:text-rose-700 hover:underline whitespace-nowrap">Reset</button>
+                    </form>
+                </li>
                 {% endfor %}
             </ul>
             {% else %}
