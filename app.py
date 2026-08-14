@@ -4675,7 +4675,10 @@ def sms_webhook():
         elif upper_body == 'START' or upper_body.startswith('START '):
             answer, next_step = start_onboarding(from_number, body)
         elif upper_body in ('HELP', 'FAQ', '?'):
-            answer, next_step = HELP_TEXT, None
+            # C-23: not mid-onboarding here (row is None, or row['step'] ==
+            # 'COMPLETE') -- give the day-to-day command list, not the
+            # onboarding-flow one from the branch above.
+            answer, next_step = COMPLETE_HELP_TEXT, None
         elif upper_body == 'STATUS':
             answer, next_step = get_onboarding_status(from_number)
         elif upper_body in ('EXIT', 'QUIT'):
@@ -4738,6 +4741,14 @@ def sms_webhook():
 
 STAGES = ['WELCOME', 'START_RECEIVED', 'DOB_VERIFIED', 'BASIC_INFO', 'TAX_INFO', 'PAYROLL', 'COMPLETE']
 
+# C-23: two distinct help texts, not one shared string, because the commands
+# that actually apply are different depending on onboarding state -- a staffer
+# still mid-onboarding can't clock in or log a tip yet, and an already-onboarded
+# staffer doesn't need START/BACK. Sending the wrong one is worse than useless.
+# Keep whichever list you edit in sync with the router's if/elif chain below
+# (the block starting "Route: onboarding bot vs. FAQ lookup") -- every keyword
+# the bot accepts should appear in its matching text, and every keyword listed
+# here must have a router branch.
 HELP_TEXT = ("Commands:\n"
              "START [DOB] - Begin onboarding (e.g. START 01/15/2000)\n"
              "STATUS - See your onboarding progress\n"
@@ -4745,6 +4756,26 @@ HELP_TEXT = ("Commands:\n"
              "EXIT - Exit and discard your in-progress onboarding\n"
              "RESTART - Redo onboarding from the beginning\n"
              "For other questions, I'll try to find an FAQ answer!")
+
+# START and EXIT/QUIT are technically still routed for a COMPLETE staffer (they
+# don't error), but both are semantic no-ops there -- start_onboarding() just
+# replies "you're already onboarded" and points to RESTART, and quit_onboarding()
+# replies "you've quit onboarding" with nothing to actually quit. Deliberately
+# left off this list so it doesn't advertise a command that does nothing useful;
+# RESTART covers the same intent.
+COMPLETE_HELP_TEXT = ("Commands:\n"
+                       "IN - Clock in\n"
+                       "OUT - Clock out\n"
+                       "BREAK - Start a break (then reply YES to confirm, NO to cancel)\n"
+                       "TIP [amount] - Log a tip, e.g. TIP 40\n"
+                       "INCIDENT [description] - Report a safety or guest incident\n"
+                       "SWAP [reason] - Request a shift swap\n"
+                       "RATE [1-5] [comment] - Rate an event you worked\n"
+                       "CONFIRM or DECLINE - Respond to an availability request\n"
+                       "PAYROLL - Get your payroll export link\n"
+                       "STATUS - Check your onboarding status\n"
+                       "RESTART - Redo onboarding from the beginning\n"
+                       "For other questions, I'll try to find an FAQ answer!")
 
 def get_venue_name() -> str:
     conn = get_db()
