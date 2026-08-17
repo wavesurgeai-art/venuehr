@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Payroll Export — VenueHR{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <a href="{{ url_for('timesheets') }}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Timesheets</a>
+</div>
+
+<h1 class="text-2xl font-bold text-gray-900 mb-2">Payroll Export</h1>
+<p class="text-gray-500 mb-6">Pick a pay period, then choose which file to download.</p>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+{% for category, message in messages %}
+<div class="mb-4 px-4 py-3 rounded-lg {% if category == 'success' %}bg-emerald-50 text-emerald-800 border border-emerald-200{% else %}bg-red-50 text-red-800 border border-red-200{% endif %}">{{ message }}</div>
+{% endfor %}
+{% endif %}
+{% endwith %}
+
+{% if not settings or not settings.adp_config_confirmed %}
+<div class="mb-6 px-4 py-3 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 text-sm">
+    ⚠ The ADP file below uses <strong>placeholder</strong> Co Code / tip earnings code / O-T settings —
+    not yet confirmed with the pilot venue's bookkeeper (B-11). Fine for testing the shape of the
+    export; not import-ready until confirmed in <a href="{{ url_for('venue_settings') }}" class="underline">Settings</a>.
+</div>
+{% endif %}
+
+{% if missing_file_number %}
+<div class="mb-6 px-4 py-3 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 text-sm">
+    ⚠ {{ missing_file_number }} active staff member{{ 's' if missing_file_number != 1 else '' }}
+    {{ 'have' if missing_file_number != 1 else 'has' }} no ADP File # set. They'll appear on the ADP
+    file with a blank File # column. Add one from each staffer's detail page.
+</div>
+{% endif %}
+
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 max-w-lg mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Pay Period</h2>
+    <form method="GET" action="{{ url_for('payroll_export_adp') }}" class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="adp-form">
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Start</label>
+            <input type="date" name="start" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">End</label>
+            <input type="date" name="end" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-rose-500">
+        </div>
+        <div class="sm:col-span-2">
+            <button type="submit" class="w-full bg-rose-600 text-white py-2 rounded-lg font-medium hover:bg-rose-700">
+                ⬇ Download ADP File (aggregated)
+            </button>
+        </div>
+    </form>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 max-w-lg">
+    <h2 class="text-lg font-semibold text-gray-900 mb-1">Detail Export (Audit Trail)</h2>
+    <p class="text-sm text-gray-500 mb-4">
+        Per-shift detail with event names, clock times and break compliance — for the venue's own
+        records, not for ADP. Uses the same pay period above; leave blank to export everything on file.
+    </p>
+    <button type="button" onclick="downloadDetail()" class="w-full bg-gray-800 text-white py-2 rounded-lg font-medium hover:bg-gray-900">
+        ⬇ Download Detail CSV
+    </button>
+</div>
+
+<script>
+function downloadDetail() {
+    const form = document.getElementById('adp-form');
+    const start = form.start.value;
+    const end = form.end.value;
+    let url = "{{ url_for('payroll_export') }}";
+    if (start && end) {
+        url += "?start=" + encodeURIComponent(start) + "&end=" + encodeURIComponent(end);
+    }
+    window.location.href = url;
+}
+</script>
+{% endblock %}
