@@ -65,6 +65,77 @@
 </div>
 
 <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 max-w-lg mt-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-1">ADP Payroll Export Configuration</h2>
+    <p class="text-sm text-gray-500 mb-4">
+        Five values only the pilot venue's bookkeeper can confirm (B-11). Until that
+        call happens, these are placeholders so the payroll export code has a shape
+        to build and test against — do not treat them as real.
+    </p>
+    {% if not settings or not settings.adp_config_confirmed %}
+    <div class="mb-4 px-4 py-3 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 text-sm">
+        ⚠ Placeholder values — not yet confirmed with the bookkeeper. The ADP export
+        will use whatever is below, but it is not import-ready until this is checked off.
+    </div>
+    {% else %}
+    <div class="mb-4 px-4 py-3 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-sm">
+        ✓ Confirmed with the bookkeeper.
+    </div>
+    {% endif %}
+    <form method="POST" action="{{ url_for('venue_settings_adp') }}">
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">ADP Co Code (3 characters)</label>
+            <input type="text" name="adp_co_code" maxlength="3"
+                   value="{{ settings.adp_co_code if settings else 'TBD' }}"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-rose-500">
+        </div>
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Tip Earnings Code (3 characters)</label>
+            <input type="text" name="adp_tip_earnings_code" maxlength="3"
+                   value="{{ settings.adp_tip_earnings_code if settings else 'TBD' }}"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-rose-500">
+            <p class="text-xs text-gray-500 mt-1">
+                Cash and charged tips currently ride under this one code — VenueHR doesn't
+                distinguish tip type today. If the bookkeeper needs separate codes, that's a
+                follow-up build.
+            </p>
+        </div>
+        <div class="mb-4">
+            <label class="flex items-center gap-2">
+                <input type="checkbox" name="adp_ot_split_enabled" value="1"
+                       {% if not settings or settings.adp_ot_split_enabled %}checked{% endif %}
+                       class="h-4 w-4 text-rose-600 rounded">
+                <span class="text-sm text-gray-700">VenueHR pre-splits Reg/O-T hours (uncheck to send raw hours and let ADP calculate O-T)</span>
+            </label>
+        </div>
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Workweek Start</label>
+            <select name="adp_workweek_start" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-rose-500">
+                {% for d in ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] %}
+                <option value="{{ d }}" {% if settings and settings.adp_workweek_start == d %}selected{% elif not settings and d == 'Monday' %}selected{% endif %}>{{ d }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">O-T Weekly Threshold (hours)</label>
+            <input type="number" step="0.5" name="adp_ot_weekly_threshold"
+                   value="{{ settings.adp_ot_weekly_threshold if settings else '40.0' }}"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-rose-500">
+        </div>
+        <div class="mb-6">
+            <label class="flex items-center gap-2">
+                <input type="checkbox" name="adp_config_confirmed" value="1"
+                       {% if settings and settings.adp_config_confirmed %}checked{% endif %}
+                       class="h-4 w-4 text-rose-600 rounded">
+                <span class="text-sm text-gray-700">I've confirmed these values with the venue's bookkeeper (B-11)</span>
+            </label>
+        </div>
+        <button type="submit" class="w-full bg-rose-600 text-white py-2 rounded-lg font-medium hover:bg-rose-700">
+            Save ADP Settings
+        </button>
+    </form>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200 max-w-lg mt-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-1">Export Venue Data</h2>
     <p class="text-sm text-gray-500 mb-4">
         Download every record for this venue in one ZIP — staff, events, timesheets, tips,
