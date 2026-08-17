@@ -468,6 +468,29 @@ def init_db():
     # Track whether the post-onboarding completion email has been sent, so it
     # fires exactly once (not on every revisit to the thanks page).
     c.execute("ALTER TABLE staff ADD COLUMN IF NOT EXISTS completion_email_sent INTEGER NOT NULL DEFAULT 0")
+    # C-11: staff.payroll_id is the ADP File # (alphanumeric, max 9) that ties a
+    # staffer to their ADP employee record. Blank until an admin sets it on the
+    # staff edit form -- there is no safe default to invent per-employee.
+    c.execute("ALTER TABLE staff ADD COLUMN IF NOT EXISTS payroll_id TEXT NOT NULL DEFAULT ''")
+    # C-9/C-10/C-11/C-15: venue-level ADP export configuration. These five values
+    # (co_code, tip_earnings_code, ot_split_enabled, workweek_start,
+    # ot_weekly_threshold) can only be answered by the pilot venue's bookkeeper
+    # (B-11, still not started). Until that call happens they are seeded with
+    # clearly-fake placeholders so the export code has a shape to build and test
+    # against (B-12: reference implementation only). adp_config_confirmed stays 0
+    # until an admin explicitly confirms real values in Settings -- every export
+    # screen checks this flag and banners accordingly. DO NOT treat a 0 flag as
+    # "good enough" for a real pilot venue's payroll.
+    for _ddl in [
+        "ALTER TABLE venue_config ADD COLUMN IF NOT EXISTS adp_co_code TEXT NOT NULL DEFAULT 'TBD'",
+        "ALTER TABLE venue_config ADD COLUMN IF NOT EXISTS adp_tip_earnings_code TEXT NOT NULL DEFAULT 'TBD'",
+        "ALTER TABLE venue_config ADD COLUMN IF NOT EXISTS adp_ot_split_enabled INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE venue_config ADD COLUMN IF NOT EXISTS adp_workweek_start TEXT NOT NULL DEFAULT 'Monday'",
+        "ALTER TABLE venue_config ADD COLUMN IF NOT EXISTS adp_ot_weekly_threshold REAL NOT NULL DEFAULT 40.0",
+        "ALTER TABLE venue_config ADD COLUMN IF NOT EXISTS adp_batch_seq INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE venue_config ADD COLUMN IF NOT EXISTS adp_config_confirmed INTEGER NOT NULL DEFAULT 0",
+    ]:
+        c.execute(_ddl)
     c.execute('''CREATE TABLE IF NOT EXISTS event_staffing (
         id TEXT PRIMARY KEY,
         event_id TEXT NOT NULL,
@@ -1177,6 +1200,9 @@ def edit_staff_core(staff_id):
     role = (request.form.get('role') or '').strip()
     employment_type = (request.form.get('employment_type') or 'w2').strip()
     hire_date = (request.form.get('hire_date') or '').strip()
+    # C-11: ADP File # -- alphanumeric, max 9 chars per the ADP spec. Optional;
+    # blank until whoever runs payroll assigns one.
+    payroll_id = re.sub(r'[^A-Za-z0-9]', '', request.form.get('payroll_id') or '')[:9].upper()
 
     if not name or not email or not role:
         conn.close()
@@ -1188,9 +1214,9 @@ def edit_staff_core(staff_id):
 
     c.execute('''UPDATE staff
                  SET name = ?, email = ?, phone = ?, role = ?,
-                     employment_type = ?, hire_date = ?
+                     employment_type = ?, hire_date = ?, payroll_id = ?
                  WHERE id = ?''',
-              (name, email, phone, role, employment_type, hire_date, staff_id))
+              (name, email, phone, role, employment_type, hire_date, payroll_id, staff_id))
     conn.commit()
     conn.close()
     flash('Staff details updated.', 'success')
@@ -2579,16 +2605,32 @@ def admin_tips_distribute(event_id):
 @app.route('/admin/payroll_export')
 @login_required
 def payroll_export():
-    """Export timesheet data as CSV."""
+    """C-9b: per-shift detail export -- the venue's own audit trail (event
+    names, clock times, break compliance). Optional ?start=&end= (YYYY-MM-DD)
+    narrows to a pay period; omitted keeps the original all-time behavior so
+    the existing Timesheets button and the SMS PAYROLL link keep working
+    unchanged."""
+    start = request.args.get('start', '')
+    end = request.args.get('end', '')
     conn = get_db()
     c = conn.cursor()
-    c.execute('''SELECT s.name, s.id as employee_id, e.name as event_name,
-                       t.clock_in, t.clock_out, t.total_hours, t.break_compliant
-                FROM timesheet_entries t
-                JOIN staff s ON t.staff_id=s.id
-                LEFT JOIN events e ON t.event_id=e.id
-                WHERE t.clock_out IS NOT NULL
-                ORDER BY t.clock_in DESC''')
+    if start and end:
+        c.execute('''SELECT s.name, s.id as employee_id, e.name as event_name,
+                           t.clock_in, t.clock_out, t.total_hours, t.break_compliant
+                    FROM timesheet_entries t
+                    JOIN staff s ON t.staff_id=s.id
+                    LEFT JOIN events e ON t.event_id=e.id
+                    WHERE t.clock_out IS NOT NULL
+                      AND LEFT(t.clock_in, 10) BETWEEN ? AND ?
+                    ORDER BY t.clock_in DESC''', (start, end))
+    else:
+        c.execute('''SELECT s.name, s.id as employee_id, e.name as event_name,
+                           t.clock_in, t.clock_out, t.total_hours, t.break_compliant
+                    FROM timesheet_entries t
+                    JOIN staff s ON t.staff_id=s.id
+                    LEFT JOIN events e ON t.event_id=e.id
+                    WHERE t.clock_out IS NOT NULL
+                    ORDER BY t.clock_in DESC''')
     rows = c.fetchall()
     conn.close()
     import io, csv
@@ -2603,6 +2645,164 @@ def payroll_export():
     return output.getvalue(), 200, {
         'Content-Type': 'text/csv',
         'Content-Disposition': 'attachment; filename=payroll_export.csv'
+    }
+
+
+_ADP_WEEKDAY_INDEX = {'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3,
+                       'Friday': 4, 'Saturday': 5, 'Sunday': 6}
+
+
+def _workweek_start(d, start_day_name):
+    """Return the date the workweek containing d begins, given a configured
+    start-of-week day name (default Monday). Used to bucket shifts for the
+    C-15 OT split."""
+    start_idx = _ADP_WEEKDAY_INDEX.get(start_day_name, 0)
+    delta = (d.weekday() - start_idx) % 7
+    return d - timedelta(days=delta)
+
+
+@app.route('/admin/payroll_export/center')
+@login_required
+def payroll_export_center():
+    """C-10: pay-period picker landing page for both payroll exports."""
+    ensure_staff_archive_schema()   # guarantees staff.archived exists for the missing-File# count
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM venue_config WHERE id = 1')
+    vc = c.fetchone()
+    c.execute("SELECT COUNT(*) as n FROM staff WHERE (payroll_id IS NULL OR payroll_id = '') AND archived = 0")
+    missing_file_number = c.fetchone()['n']
+    conn.close()
+    return render_template('admin_payroll_export.html', settings=vc,
+                          missing_file_number=missing_file_number,
+                          admin_name=session.get('admin_name'))
+
+
+@app.route('/admin/payroll_export/adp')
+@login_required
+def payroll_export_adp():
+    """C-9/C-10/C-11/C-15: ADP-format aggregated payroll export. One row per
+    employee per pay period; columns match the ADP spec exactly (Co Code,
+    Batch ID, File #, Temp Dept, Reg Hours, O/T Hours, Hours 3 Code/Amount,
+    Earnings 3 Code/Amount) -- strict importers reject unknown columns, so
+    nothing else gets added to this file. Hours 3 Code/Amount has no VenueHR
+    data behind it yet and is left blank.
+
+    REFERENCE IMPLEMENTATION (B-12): venue_config.adp_* below is placeholder
+    until B-11 (ten minutes with the pilot venue's bookkeeper) happens. Every
+    row this route produces is only as real as those five values -- check
+    venue_config.adp_config_confirmed before treating any of this as
+    import-ready.
+    """
+    start = request.args.get('start', '')
+    end = request.args.get('end', '')
+    if not start or not end:
+        flash('Pick a pay-period start and end date first.', 'error')
+        return redirect(url_for('payroll_export_center'))
+    try:
+        start_d = datetime.strptime(start, '%Y-%m-%d').date()
+        end_d = datetime.strptime(end, '%Y-%m-%d').date()
+    except ValueError:
+        flash('Invalid date range.', 'error')
+        return redirect(url_for('payroll_export_center'))
+    if end_d < start_d:
+        flash('End date must be on or after the start date.', 'error')
+        return redirect(url_for('payroll_export_center'))
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM venue_config WHERE id = 1')
+    vc = c.fetchone()
+    co_code = (vc['adp_co_code'] if vc else 'TBD') or 'TBD'
+    tip_code = (vc['adp_tip_earnings_code'] if vc else 'TBD') or 'TBD'
+    ot_split_enabled = bool(vc['adp_ot_split_enabled']) if vc else True
+    workweek_start_name = (vc['adp_workweek_start'] if vc else 'Monday') or 'Monday'
+    ot_threshold = float(vc['adp_ot_weekly_threshold']) if vc and vc['adp_ot_weekly_threshold'] is not None else 40.0
+
+    # Batch ID: a fresh sequence number per generated file, persisted so it
+    # keeps climbing across exports instead of resetting (e.g. TIME01, TIME02).
+    c.execute('UPDATE venue_config SET adp_batch_seq = adp_batch_seq + 1 WHERE id = 1 RETURNING adp_batch_seq')
+    seq_row = c.fetchone()
+    batch_seq = seq_row['adp_batch_seq'] if seq_row else 1
+    conn.commit()
+    batch_id = f"TIME{batch_seq:02d}" if batch_seq < 100 else f"TIME{batch_seq}"
+
+    # Hours: every completed shift whose clock-in date falls in the pay period.
+    c.execute('''SELECT t.staff_id, s.name, s.payroll_id, t.clock_in, t.total_hours
+                 FROM timesheet_entries t
+                 JOIN staff s ON t.staff_id = s.id
+                 WHERE t.clock_out IS NOT NULL
+                   AND LEFT(t.clock_in, 10) BETWEEN ? AND ?
+                 ORDER BY s.name, t.clock_in''', (start, end))
+    shift_rows = c.fetchall()
+
+    # Tips: reported in the same window, ride as a flat-dollar Earnings 3
+    # amount (like a bonus), never as hours -- see C-11.
+    c.execute('''SELECT staff_id, SUM(amount) as tip_total
+                 FROM tip_entries
+                 WHERE LEFT(recorded_at, 10) BETWEEN ? AND ?
+                 GROUP BY staff_id''', (start, end))
+    tip_totals = {r['staff_id']: float(r['tip_total'] or 0) for r in c.fetchall()}
+
+    staff_names = {}
+    weekly_hours = {}  # (staff_id, workweek_start_date) -> hours
+    for r in shift_rows:
+        sid = r['staff_id']
+        staff_names[sid] = (r['name'], r['payroll_id'])
+        hours = float(r['total_hours'] or 0)
+        clock_in_date = datetime.fromisoformat(r['clock_in']).date()
+        wk = _workweek_start(clock_in_date, workweek_start_name)
+        weekly_hours[(sid, wk)] = weekly_hours.get((sid, wk), 0.0) + hours
+
+    # A staffer can have tips in the window with zero worked hours recorded
+    # (e.g. a correction); make sure their name still resolves.
+    missing_ids = [sid for sid in tip_totals if sid not in staff_names]
+    if missing_ids:
+        placeholders = ','.join(['?'] * len(missing_ids))
+        c.execute(f'SELECT id, name, payroll_id FROM staff WHERE id IN ({placeholders})', missing_ids)
+        for r in c.fetchall():
+            staff_names[r['id']] = (r['name'], r['payroll_id'])
+    conn.close()
+
+    # Roll each (staff, workweek) bucket into Reg/O-T per the C-15 preference.
+    # Note: if the pay-period boundary falls mid-workweek, a straddling week
+    # is only summed using shifts inside this window -- a known simplification
+    # to revisit once B-11 confirms real pay-period/workweek alignment.
+    reg_hours = {}
+    ot_hours = {}
+    for (sid, wk), hours in weekly_hours.items():
+        if ot_split_enabled:
+            reg = min(hours, ot_threshold)
+            ot = max(0.0, hours - ot_threshold)
+        else:
+            # Raw-hours mode: send everything as Reg, let ADP calculate OT.
+            reg, ot = hours, 0.0
+        reg_hours[sid] = reg_hours.get(sid, 0.0) + reg
+        ot_hours[sid] = ot_hours.get(sid, 0.0) + ot
+
+    all_staff_ids = sorted(set(list(staff_names.keys()) + list(tip_totals.keys())),
+                            key=lambda sid: staff_names.get(sid, ('', ''))[0] or '')
+
+    import io, csv
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Co Code', 'Batch ID', 'File #', 'Temp Dept', 'Reg Hours', 'O/T Hours',
+                      'Hours 3 Code', 'Hours 3 Amount', 'Earnings 3 Code', 'Earnings 3 Amount'])
+    for sid in all_staff_ids:
+        _name, payroll_id = staff_names.get(sid, (None, ''))
+        tip_amt = tip_totals.get(sid, 0.0)
+        earnings_code = tip_code if tip_amt else ''
+        writer.writerow([
+            co_code, batch_id, payroll_id or '', '',
+            round(reg_hours.get(sid, 0.0), 2), round(ot_hours.get(sid, 0.0), 2),
+            '', '',
+            earnings_code, f'{tip_amt:.2f}' if tip_amt else '',
+        ])
+    output.seek(0)
+
+    return output.getvalue(), 200, {
+        'Content-Type': 'text/csv',
+        'Content-Disposition': f'attachment; filename=payroll_export_adp_{start}_to_{end}.csv'
     }
 
 @app.route('/admin/venue/export')
@@ -3533,8 +3733,14 @@ def venue_settings():
         manager_phone = request.form.get('manager_phone', '')
         tip_pool = request.form.get('tip_pool_enabled', '')
         tip_rate = request.form.get('tipout_rate', '0.20')
-        c.execute('DELETE FROM venue_config WHERE id = 1')
-        c.execute('INSERT INTO venue_config (id, venue_name, manager_phone, tip_pool_enabled, tipout_rate) VALUES (1, ?, ?, ?, ?)',
+        # UPDATE, not DELETE+INSERT -- a bare re-INSERT with only these four
+        # columns named would silently reset every other venue_config column
+        # (tip_model, and now the C-11 adp_* columns) back to its schema
+        # default on every unrelated settings save. Found while wiring up the
+        # ADP export config; fixed here rather than left to bite later.
+        c.execute('''UPDATE venue_config
+                     SET venue_name = ?, manager_phone = ?, tip_pool_enabled = ?, tipout_rate = ?
+                     WHERE id = 1''',
                   (venue_name, manager_phone, 1 if tip_pool else 0, float(tip_rate)))
         conn.commit()
         flash('Settings saved.', 'success')
@@ -3542,6 +3748,46 @@ def venue_settings():
     row = c.fetchone()
     conn.close()
     return render_template('admin_settings.html', settings=row, admin_name=session.get('admin_name'))
+
+
+@app.route('/admin/settings/adp', methods=['POST'])
+@login_required
+def venue_settings_adp():
+    """C-11: save the venue-level ADP export configuration. Kept as its own
+    route/form (separate from venue_settings() above) so a save here can never
+    touch venue_name/manager_phone/tip settings and vice versa.
+
+    These five fields (Co Code, tip earnings code, OT split preference,
+    workweek start, OT weekly threshold) are exactly the five values B-11 says
+    only the pilot venue's bookkeeper can supply. Until that call happens this
+    form just lets an admin store PLACEHOLDER values so the export code has
+    something concrete to build and test against (B-12). Checking "I've
+    confirmed these with the bookkeeper" is the only thing that clears the
+    placeholder banner -- it does not change any validation, it is purely an
+    honesty flag surfaced on every export screen.
+    """
+    conn = get_db()
+    c = conn.cursor()
+    co_code = (request.form.get('adp_co_code') or 'TBD').strip()[:3].upper() or 'TBD'
+    tip_code = (request.form.get('adp_tip_earnings_code') or 'TBD').strip()[:3].upper() or 'TBD'
+    ot_split = 1 if request.form.get('adp_ot_split_enabled') else 0
+    workweek_start = request.form.get('adp_workweek_start', 'Monday')
+    if workweek_start not in ('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'):
+        workweek_start = 'Monday'
+    try:
+        ot_threshold = float(request.form.get('adp_ot_weekly_threshold', '40.0'))
+    except ValueError:
+        ot_threshold = 40.0
+    confirmed = 1 if request.form.get('adp_config_confirmed') else 0
+    c.execute('''UPDATE venue_config
+                 SET adp_co_code = ?, adp_tip_earnings_code = ?, adp_ot_split_enabled = ?,
+                     adp_workweek_start = ?, adp_ot_weekly_threshold = ?, adp_config_confirmed = ?
+                 WHERE id = 1''',
+              (co_code, tip_code, ot_split, workweek_start, ot_threshold, confirmed))
+    conn.commit()
+    conn.close()
+    flash('ADP export settings saved.', 'success')
+    return redirect(url_for('venue_settings'))
 
 @app.route('/admin/settings/pin', methods=['POST'])
 @login_required
