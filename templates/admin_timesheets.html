@@ -5,10 +5,16 @@
 {% block content %}
 <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
     <h1 class="text-2xl font-bold text-gray-900">Timesheets</h1>
-    <a href="{{ url_for('payroll_export') }}"
-       class="inline-flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium px-4 py-2 rounded-lg">
-        ⬇ Export Payroll (CSV)
-    </a>
+    <div class="flex gap-2">
+        <a href="{{ url_for('payroll_export') }}"
+           class="inline-flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium px-4 py-2 rounded-lg">
+            ⬇ Export Payroll (CSV)
+        </a>
+        <a href="{{ url_for('payroll_export_center') }}"
+           class="inline-flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium px-4 py-2 rounded-lg">
+            ADP Payroll Export
+        </a>
+    </div>
 </div>
 
 <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
