@@ -10,7 +10,8 @@ import re
 import time
 import hashlib
 import threading
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
+from zoneinfo import ZoneInfo
 from functools import wraps
 
 import bcrypt
@@ -315,6 +316,23 @@ import psycopg2.extras
 import psycopg2.extensions
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
+
+
+# C-31: SMS clock-in/out/break confirmations were showing raw UTC time --
+# e.g. a 6:21 PM local clock-in texted back "10:20 PM" during a live demo
+# rehearsal. Every stored timestamp in this app stays naive UTC (all the
+# elapsed-time math depends on that), but anything DISPLAYED to a human
+# needs to be converted first. VENUE_TZ is a single hardcoded zone because
+# VenueHR is single-tenant today (one venue_config row) -- make this
+# venue-configurable if/when multi-tenancy adds a venue outside Eastern.
+VENUE_TZ = ZoneInfo('America/Indiana/Indianapolis')
+
+
+def _local_clock_str(dt):
+    """Format a naive-UTC datetime as a 12-hour local clock string for
+    display only. Never use this value for arithmetic or storage -- pass
+    the original (UTC) datetime to isoformat()/timedelta math as before."""
+    return dt.replace(tzinfo=timezone.utc).astimezone(VENUE_TZ).strftime('%I:%M %p')
 
 
 def _translate(sql):
@@ -3968,7 +3986,7 @@ def handle_clock(phone: str, body: str, action: str):
         conn.commit()
         conn.close()
         event_info = f"\nEvent: {event['name']}" if event else ""
-        return (f"✅ Clocked in at {now.strftime('%I:%M %p')}, {staff_name}.{event_info}\n"
+        return (f"✅ Clocked in at {_local_clock_str(now)}, {staff_name}.{event_info}\n"
                 "Enjoy your shift! Reply BREAK to start a break."), None
 
     else:  # OUT
@@ -4001,7 +4019,7 @@ def handle_clock(phone: str, body: str, action: str):
                   (now.isoformat(), now.isoformat() if break_start else None, compliant, round(total_hours, 2), entry_id))
         conn.commit()
         conn.close()
-        return (f"✅ Clocked out at {now.strftime('%I:%M %p')}, {staff_name}.\n"
+        return (f"✅ Clocked out at {_local_clock_str(now)}, {staff_name}.\n"
                 f"Total shift: {round(total_hours, 2)} hours."), None
 
 def handle_break_response(phone: str, body: str):
@@ -4040,7 +4058,7 @@ def handle_break_response(phone: str, body: str):
                   (now.isoformat(), entry['id']))
         conn.commit()
         conn.close()
-        return (f"☕ Break started at {now.strftime('%I:%M %p')}.\n"
+        return (f"☕ Break started at {_local_clock_str(now)}.\n"
                 "Reply YES when you're back to end your break.\n"
                 "NOTE: Breaks under 30 min are logged as non-compliant.")
     else:
@@ -4056,10 +4074,10 @@ def handle_break_response(phone: str, body: str):
         conn.commit()
         conn.close()
         if compliant:
-            return (f"✅ Break ended at {now.strftime('%I:%M %p')}.\n"
+            return (f"✅ Break ended at {_local_clock_str(now)}.\n"
                     f"Break duration: {round(break_duration, 2)} hrs — compliant. ✅")
         else:
-            return (f"⚠️ Break ended at {now.strftime('%I:%M %p')}.\n"
+            return (f"⚠️ Break ended at {_local_clock_str(now)}.\n"
                     f"Break was {round(break_duration, 2)} hrs — under 30 min. Marked non-compliant.")
 
 # ─── Tip Handler ────────────────────────────────────────────────────────────────
