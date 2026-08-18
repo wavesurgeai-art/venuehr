@@ -197,6 +197,36 @@ ONBOARDING_STEPS = [
         'fields': [],
     },
     {
+        # C-30: SMS opt-in was previously mentioned only in the post-completion
+        # email, after all 7 documents were already signed -- easy to miss, and
+        # anyone who skipped that one line never got day-of texts with no
+        # indication anything was missing. Moved here, step 2, right after the
+        # agreement. The required 'ack' below is a neutral "I saw this and made
+        # a choice" acknowledgment, NOT "I agree to receive texts" -- the SMS
+        # box itself stays genuinely optional (carrier rule 30923 forbids
+        # making SMS consent a condition of onboarding). See _record_sms_consent().
+        'key': 'sms_optin',
+        'title': 'Text Alerts (Optional)',
+        'subtitle': 'Clock in/out and get shift reminders by text -- never required',
+        'body': (
+            "VenueHR can text you shift reminders, schedule changes, and let you clock in "
+            "and out and log tips right from your phone -- no app to install.\n\n"
+            "This is completely optional and is never required to work here. If you'd "
+            "rather not receive texts, leave the box below unchecked and continue -- "
+            "everything else about your job stays exactly the same.\n\n"
+            "If you opt in, message and data rates may apply and message frequency "
+            "varies. Reply STOP to any text at any time to opt out again.\n\n"
+            "Changed your mind later? You can opt in or out anytime at "
+            "wavesurgeai.com/sms-opt-in."
+        ),
+        'ack': 'I understand text messaging is optional and never required, and I have made my choice below.',
+        'signature': False,
+        'fields': [
+            {'name': 'sms_consent', 'label': 'Yes, text me shift reminders and let me clock in/out by text',
+             'type': 'checkbox', 'required': False},
+        ],
+    },
+    {
         'key': 'handbook',
         'title': 'Employee Handbook Acknowledgment',
         'subtitle': 'Confirm you have reviewed the staff handbook',
@@ -1597,6 +1627,65 @@ def get_sms_consented_numbers(c):
     return [r['phone'] for r in c.fetchall()]
 
 
+def _record_sms_consent(first, last, phone, email, consented_checked, source, ip_address, user_agent=''):
+    """Upsert one sms_consent row (upgrade-only -- once granted it stays granted;
+    withdrawal is carrier-level STOP only, same as before) and, if this call
+    grants consent, send the same confirmation SMS + email every time.
+
+    Single source of truth for consent-recording (C-30), shared by the public
+    /sms/optin page and the onboarding wizard's sms_optin step -- one place
+    that writes consent, not two copies of this logic that can drift apart on
+    something this compliance-sensitive (TCPA/A2P).
+    """
+    ensure_sms_consent_schema()
+    now = datetime.utcnow().isoformat()
+    consented = 1 if consented_checked else 0
+    consented_at = now if consented_checked else None
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''INSERT INTO sms_consent
+        (id, first_name, last_name, phone, email, consented, consented_at,
+         source, ip_address, user_agent, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (phone) DO UPDATE SET
+            first_name = EXCLUDED.first_name,
+            last_name = EXCLUDED.last_name,
+            email = EXCLUDED.email,
+            consented = GREATEST(sms_consent.consented, EXCLUDED.consented),
+            consented_at = COALESCE(sms_consent.consented_at, EXCLUDED.consented_at),
+            source = EXCLUDED.source,
+            ip_address = EXCLUDED.ip_address,
+            user_agent = EXCLUDED.user_agent,
+            updated_at = EXCLUDED.updated_at''',
+        (str(uuid.uuid4()), first, last, phone, email, consented, consented_at,
+         source, ip_address, user_agent, now))
+    conn.commit()
+    conn.close()
+
+    if consented_checked:
+        send_sms_alert(
+            phone,
+            "WaveSurgeAI: You're subscribed to VenueHR staff notifications. "
+            "Msg & data rates may apply. Reply STOP to opt out, HELP for help.")
+        send_email(
+            email,
+            "You're subscribed to WaveSurgeAI SMS notifications",
+            f"Hi {first},\n\n"
+            "You've opted in to receive WaveSurgeAI VenueHR staff notifications "
+            f"at {phone}.\n\n"
+            "These are operational messages only — shift reminders, schedule "
+            "updates, and availability requests. Message and data rates may apply; "
+            "message frequency varies.\n\n"
+            "Reply STOP to any text to unsubscribe at any time, or HELP for "
+            "assistance.\n\n"
+            "If you did not request this, reply STOP and you will not be texted "
+            "again.\n\n"
+            "— WaveSurgeAI · Wave Surge AI LLC")
+        app.logger.info(f'SMS consent recorded + confirmation sent: {phone} (source={source})')
+    else:
+        app.logger.info(f'SMS consent saved WITHOUT opt-in (no text sent): {phone} (source={source})')
+
+
 def _completed_onboarding_docs(c, staff_member):
     """Set of completed onboarding doc_type keys for a staff member."""
     c.execute('SELECT doc_type FROM onboarding_documents WHERE staff_id = ?', (staff_member['id'],))
@@ -1676,6 +1765,18 @@ def onboard(token):
                       (str(uuid.uuid4()), staff_member['id'], now, request.remote_addr,
                        signature_data or None, AGREEMENT_TEXT))
             c.execute("UPDATE staff SET agreement_status = 'signed' WHERE id = ?", (staff_member['id'],))
+        elif step_key == 'sms_optin':
+            # C-30: record consent here in the wizard, not only on the standalone
+            # /sms/optin page. Skip silently if there's no phone on file -- there's
+            # nothing to opt in either way, but the step still completes normally.
+            if staff_member['phone']:
+                first_name, _, last_name = (staff_member['name'] or '').partition(' ')
+                _record_sms_consent(
+                    first_name or staff_member['name'], last_name,
+                    staff_member['phone'], staff_member['email'] or '',
+                    field_data.get('sms_consent') == 'yes',
+                    'onboarding_wizard', request.remote_addr,
+                    request.headers.get('User-Agent', '')[:300])
         elif step_key == 'direct_deposit':
             _upsert_profile(c, staff_member['id'], {
                 'bank_name': field_data.get('bank_name', ''),
@@ -1730,17 +1831,29 @@ def onboard_thanks(token):
     # Fire the completion email exactly once, when onboarding is fully done.
     if all_done and not staff_member['completion_email_sent'] and staff_member['email']:
         venue_name = get_venue_name()
+        # C-30: the wizard now asks about SMS opt-in as step 2, so by the time
+        # someone reaches this completion email they've already made a choice.
+        # Check what they chose (keyed by phone, same as sms_consent everywhere
+        # else) rather than re-pitching it as if it were new.
+        c.execute('SELECT consented FROM sms_consent WHERE phone = ?', (staff_member['phone'],))
+        consent_row = c.fetchone()
+        if consent_row and consent_row['consented']:
+            sms_block = ("📱 You're all set for texts — shift reminders, clock-in/out, and "
+                         "quick updates will come straight to your phone. Reply STOP anytime to opt out.")
+        else:
+            sms_block = ("📱 One more thing (optional): you can still opt in to text messaging "
+                         "for shift reminders, clocking in and out, and quick updates, anytime here:\n"
+                         "        https://wavesurgeai.com/sms-opt-in\n\n"
+                         "        Texting is completely optional and is never required to work with us.")
         completion_body = f"""Hi {staff_member['name']},
 
         Congratulations! You've completed your onboarding with {venue_name}. 🎉
 
         All of your documents are signed and on file, and you're ready to be added to the schedule.
 
-        📱 Stay in the loop by text (optional):
-        For ongoing operations — shift reminders, clocking in and out, and quick updates — you can opt in to text messaging here:
-        https://wavesurgeai.com/sms-opt-in
+        {sms_block}
 
-        Texting is completely optional and is never required to work with us. If you have any questions, please contact your manager.
+        If you have any questions, please contact your manager.
 
         Welcome to the team!
         """
@@ -4763,61 +4876,16 @@ def sms_optin():
         return reply({'ok': False,
                       'error': 'Please enter a valid US mobile number.'}, 400)
 
-    now = datetime.utcnow().isoformat()
-    consented = 1 if sms_optin_checked else 0
-    consented_at = now if sms_optin_checked else None
     ua = request.headers.get('User-Agent', '')[:300]
-
     try:
-        conn = get_db()
-        c = conn.cursor()
-        # Upsert on phone. Contact details + updated_at always refresh; consent is
-        # "upgrade-only" — once granted it stays, and the original consent
-        # timestamp is preserved. Withdrawal is handled by carrier-level STOP.
-        c.execute('''INSERT INTO sms_consent
-            (id, first_name, last_name, phone, email, consented, consented_at,
-             source, ip_address, user_agent, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (phone) DO UPDATE SET
-                first_name = EXCLUDED.first_name,
-                last_name = EXCLUDED.last_name,
-                email = EXCLUDED.email,
-                consented = GREATEST(sms_consent.consented, EXCLUDED.consented),
-                consented_at = COALESCE(sms_consent.consented_at, EXCLUDED.consented_at),
-                source = EXCLUDED.source,
-                ip_address = EXCLUDED.ip_address,
-                user_agent = EXCLUDED.user_agent,
-                updated_at = EXCLUDED.updated_at''',
-            (str(uuid.uuid4()), first, last, phone, email, consented, consented_at,
-             'web_optin', ip, ua, now))
-        conn.commit()
-        conn.close()
+        _record_sms_consent(first, last, phone, email, sms_optin_checked,
+                             'web_optin', ip, ua)
     except Exception as e:
         app.logger.error(f'SMS opt-in store failed for {phone}: {e}')
         return reply({'ok': False,
                       'error': 'Something went wrong saving your request. Please try again.'}, 500)
 
     if sms_optin_checked:
-        # Confirmation SMS (welcome + STOP instructions) and an email receipt.
-        send_sms_alert(
-            phone,
-            "WaveSurgeAI: You're subscribed to VenueHR staff notifications. "
-            "Msg & data rates may apply. Reply STOP to opt out, HELP for help.")
-        send_email(
-            email,
-            "You're subscribed to WaveSurgeAI SMS notifications",
-            f"Hi {first},\n\n"
-            "You've opted in to receive WaveSurgeAI VenueHR staff notifications "
-            f"at {phone}.\n\n"
-            "These are operational messages only — shift reminders, schedule "
-            "updates, and availability requests. Message and data rates may apply; "
-            "message frequency varies.\n\n"
-            "Reply STOP to any text to unsubscribe at any time, or HELP for "
-            "assistance.\n\n"
-            "If you did not request this, reply STOP and you will not be texted "
-            "again.\n\n"
-            "— WaveSurgeAI · Wave Surge AI LLC")
-        app.logger.info(f'SMS opt-in recorded + confirmation sent: {phone}')
         return reply({
             'ok': True,
             'subscribed': True,
@@ -4825,7 +4893,6 @@ def sms_optin():
                        "reply STOP anytime to opt out."})
 
     # Terms accepted but SMS box left unchecked: saved, but NOT subscribed.
-    app.logger.info(f'SMS opt-in form saved WITHOUT consent (no text sent): {phone}')
     return reply({
         'ok': True,
         'subscribed': False,
