@@ -4929,8 +4929,14 @@ def sms_webhook():
             answer, next_step = get_onboarding_status(from_number)
         elif upper_body in ('EXIT', 'QUIT'):
             answer, next_step = quit_onboarding(from_number)
-        elif upper_body in ('IN', 'OUT'):
-            if upper_body == 'IN':
+        elif upper_body in ('IN', 'OUT', 'CLOCK IN', 'CLOCKED IN', 'CLOCKING IN',
+                             'CLOCK OUT', 'CLOCKED OUT', 'CLOCKING OUT'):
+            # C-29: natural phrasings ('clock in', 'clocked in', 'clocking in' /
+            # the OUT equivalents) route to the same handle_clock() branches as
+            # bare IN/OUT. Previously these fell through to the FAQ fuzzy-matcher,
+            # which could hand back an unrelated FAQ (e.g. 'in' substring-matched
+            # 'dining') with no signal the clock-in itself never happened.
+            if upper_body in ('IN', 'CLOCK IN', 'CLOCKED IN', 'CLOCKING IN'):
                 answer, next_step = handle_clock(from_number, body, 'IN')
             else:
                 answer, next_step = handle_clock(from_number, body, 'OUT')
